@@ -91,50 +91,41 @@ tasks.withType<JavaCompile>().configureEach {
     options.release.set(8)
 }
 
-// 自定义任务类：合并两个 bundles 目录下的 properties 文件
-abstract class MergeBundlePropertiesTask : DefaultTask() {
+// 定义输出目录（在 build 下）
+val mergedBundlesRoot = project.layout.buildDirectory.dir("mergedBundles").get()
 
-    @get:InputDirectory
-    abstract val ideBundleDir: DirectoryProperty
+tasks.register<DefaultTask>("mergeBundleProperties") {
+    // 输入声明
+    val ideDir = file("ide/assets/bundles")
+    val mlogixDir = file("mlogix/assets/bundles")
+    inputs.dir(ideDir).withPropertyName("ideBundleDir")
+    inputs.dir(mlogixDir).withPropertyName("mlogixBundleDir")
+    // 输出声明（使用 project.layout）
+    outputs.dir(mergedBundlesRoot)
 
-    @get:InputDirectory
-    abstract val mlogixBundleDir: DirectoryProperty
-
-    @get:OutputDirectory
-    abstract val outputDir: DirectoryProperty
-
-    @TaskAction
-    fun merge() {
-        val ideDir = ideBundleDir.get().asFile
-        val mlogixDir = mlogixBundleDir.get().asFile
-        val outputRoot = outputDir.get().asFile
-
-        // 收集所有文件（以相对路径为键）
+    doLast {
         val fileMap = mutableMapOf<String, MutableList<File>>()
-
-        fun collectFiles(dir: File) {
+        fun collectFiles(dir: File, base: String = "") {
             if (!dir.exists()) return
             dir.walkTopDown().filter { it.isFile }.forEach { file ->
                 val relative = file.relativeTo(dir).path
-                fileMap.getOrPut(relative) { mutableListOf() }.add(file)
+                val key = if (base.isEmpty()) relative else "$base/$relative"
+                fileMap.getOrPut(key) { mutableListOf() }.add(file)
             }
         }
-
         collectFiles(ideDir)
         collectFiles(mlogixDir)
 
-        // 处理每个相对路径
         fileMap.forEach { (relativePath, files) ->
-            val outputFile = outputRoot.resolve(relativePath)
+            // 输出文件路径：使用 mergedBundlesRoot（Directory 类型）
+            val outputFile = mergedBundlesRoot.file(relativePath).asFile
             outputFile.parentFile.mkdirs()
 
             when (files.size) {
                 1 -> {
-                    // 只有一个来源，直接复制
                     files.first().copyTo(outputFile, overwrite = true)
                 }
                 else -> {
-                    // 多个来源（通常是两个），合并 properties
                     require(files.all { it.extension == "properties" }) {
                         "Only .properties files are supported, but found: ${files.map { it.name }}"
                     }
@@ -143,7 +134,6 @@ abstract class MergeBundlePropertiesTask : DefaultTask() {
                         file.inputStream().use { ins ->
                             val props = Properties()
                             props.load(ins)
-                            // 检查重复键并报警告
                             props.keys.forEach { key ->
                                 if (merged.containsKey(key)) {
                                     logger.warn(
@@ -155,7 +145,6 @@ abstract class MergeBundlePropertiesTask : DefaultTask() {
                             merged.putAll(props)
                         }
                     }
-                    // 写入合并后的 properties
                     outputFile.writer().use { writer ->
                         merged.store(writer, "Merged bundle.properties")
                     }
@@ -163,13 +152,6 @@ abstract class MergeBundlePropertiesTask : DefaultTask() {
             }
         }
     }
-}
-
-// 注册任务
-tasks.register<MergeBundlePropertiesTask>("mergeBundleProperties") {
-    ideBundleDir.set(file("ide/assets/bundles"))
-    mlogixBundleDir.set(file("mlogix/assets/bundles"))
-    outputDir.set(layout.buildDirectory.dir("mergedBundles"))
 }
 
 tasks.jar {
@@ -184,7 +166,7 @@ tasks.jar {
         include("mod.hjson")
     }
 
-    from(layout.buildDirectory.dir("mergedBundles")) {
+    from(mergedBundlesRoot) {
         into("assets/bundles/")
     }
 
