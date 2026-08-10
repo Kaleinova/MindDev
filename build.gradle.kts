@@ -1,5 +1,7 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.util.Properties
+
 
 version = "0.1"
 
@@ -89,6 +91,113 @@ tasks.withType<JavaCompile>().configureEach {
     options.release.set(8)
 }
 
+// 自定义任务类：合并两个 bundles 目录下的 properties 文件
+abstract class MergeBundlePropertiesTask : DefaultTask() {
+
+    @get:InputDirectory
+    abstract val ideBundleDir: DirectoryProperty
+
+    @get:InputDirectory
+    abstract val mlogixBundleDir: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun merge() {
+        val ideDir = ideBundleDir.get().asFile
+        val mlogixDir = mlogixBundleDir.get().asFile
+        val outputRoot = outputDir.get().asFile
+
+        // 收集所有文件（以相对路径为键）
+        val fileMap = mutableMapOf<String, MutableList<File>>()
+
+        fun collectFiles(dir: File) {
+            if (!dir.exists()) return
+            dir.walkTopDown().filter { it.isFile }.forEach { file ->
+                val relative = file.relativeTo(dir).path
+                fileMap.getOrPut(relative) { mutableListOf() }.add(file)
+            }
+        }
+
+        collectFiles(ideDir)
+        collectFiles(mlogixDir)
+
+        // 处理每个相对路径
+        fileMap.forEach { (relativePath, files) ->
+            val outputFile = outputRoot.resolve(relativePath)
+            outputFile.parentFile.mkdirs()
+
+            when (files.size) {
+                1 -> {
+                    // 只有一个来源，直接复制
+                    files.first().copyTo(outputFile, overwrite = true)
+                }
+                else -> {
+                    // 多个来源（通常是两个），合并 properties
+                    require(files.all { it.extension == "properties" }) {
+                        "Only .properties files are supported, but found: ${files.map { it.name }}"
+                    }
+                    val merged = Properties()
+                    files.forEach { file ->
+                        file.inputStream().use { ins ->
+                            val props = Properties()
+                            props.load(ins)
+                            // 检查重复键并报警告
+                            props.keys.forEach { key ->
+                                if (merged.containsKey(key)) {
+                                    logger.warn(
+                                        "Duplicate key '$key' in file '$relativePath' " +
+                                                "from source: ${file.parentFile.name}"
+                                    )
+                                }
+                            }
+                            merged.putAll(props)
+                        }
+                    }
+                    // 写入合并后的 properties
+                    outputFile.writer().use { writer ->
+                        merged.store(writer, "Merged bundle.properties")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 注册任务
+tasks.register<MergeBundlePropertiesTask>("mergeBundleProperties") {
+    ideBundleDir.set(file("ide/assets/bundles"))
+    mlogixBundleDir.set(file("mlogix/assets/bundles"))
+    outputDir.set(layout.buildDirectory.dir("mergedBundles"))
+}
+
+tasks.jar {
+    duplicatesStrategy = DuplicatesStrategy.WARN
+    archiveFileName.set("${modArtifactName}Desktop.jar")
+
+    dependsOn("mergeBundleProperties")
+
+    from(configurations.runtimeClasspath.map { config -> config.map { if (it.isDirectory) it else zipTree(it) } })
+
+    from(rootDir) {
+        include("mod.hjson")
+    }
+
+    from(layout.buildDirectory.dir("mergedBundles")) {
+        into("assets/bundles/")
+    }
+
+    from("ide/assets/") {
+        exclude("bundles/")
+        into("assets/")
+    }
+    from("mlogix/assets/") {
+        exclude("bundles/")
+        into("assets/")
+    }
+}
+
 val jarAndroid = tasks.register("jarAndroid") {
     dependsOn("jar")
 
@@ -121,24 +230,6 @@ val jarAndroid = tasks.register("jarAndroid") {
             .redirectError(ProcessBuilder.Redirect.INHERIT)
             .start()
         process.waitFor()
-    }
-}
-
-tasks.jar {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    archiveFileName.set("${modArtifactName}Desktop.jar")
-
-    from(configurations.runtimeClasspath.map { config -> config.map { if (it.isDirectory) it else zipTree(it) } })
-
-    from(rootDir) {
-        include("mod.hjson")
-    }
-
-    from("ide/assets/") {
-        into("assets/")
-    }
-    from("mlogix/assets/") {
-        into("assets/")
     }
 }
 
