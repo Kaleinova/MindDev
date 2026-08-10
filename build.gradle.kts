@@ -1,9 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-import java.util.Properties
-
-
-version = "0.1"
+import java.util.*
 
 buildscript {
     repositories {
@@ -11,11 +8,6 @@ buildscript {
     }
 }
 
-// Mindustry version to depend on.
-// Valid values:
-// - latest: depend on the latest release of mindustry
-// - be: depend on the very latest commit of mindustry
-// - v<number>: depend on a specific version
 val mindustryVersion = project.property("mindustryVersion") as String
 val kotlinVersion = project.property("kotlinVersion") as String
 val sdkRoot: String? = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
@@ -24,10 +16,6 @@ val modArtifactName = project.name
 
 plugins {
     kotlin("jvm") version "2.3.20"
-}
-
-sourceSets.main {
-    kotlin.srcDirs("ide/src")
 }
 
 allprojects {
@@ -76,6 +64,7 @@ allprojects {
 
 dependencies {
     compileOnly(if (mindustryVersion == "be") "Anuken:MindustryBuilds:latest" else "Anuken:Mindustry:$mindustryVersion")
+    implementation(project(":minddev"))
     implementation(project(":mlogix"))
 }
 
@@ -96,9 +85,9 @@ val mergedBundlesRoot = project.layout.buildDirectory.dir("mergedBundles").get()
 
 tasks.register<DefaultTask>("mergeBundleProperties") {
     // 输入声明
-    val ideDir = file("ide/assets/bundles")
+    val minddevDir = file("minddev/assets/bundles")
     val mlogixDir = file("mlogix/assets/bundles")
-    inputs.dir(ideDir).withPropertyName("ideBundleDir")
+    inputs.dir(minddevDir).withPropertyName("minddevBundleDir")
     inputs.dir(mlogixDir).withPropertyName("mlogixBundleDir")
     // 输出声明（使用 project.layout）
     outputs.dir(mergedBundlesRoot)
@@ -113,7 +102,7 @@ tasks.register<DefaultTask>("mergeBundleProperties") {
                 fileMap.getOrPut(key) { mutableListOf() }.add(file)
             }
         }
-        collectFiles(ideDir)
+        collectFiles(minddevDir)
         collectFiles(mlogixDir)
 
         fileMap.forEach { (relativePath, files) ->
@@ -125,6 +114,7 @@ tasks.register<DefaultTask>("mergeBundleProperties") {
                 1 -> {
                     files.first().copyTo(outputFile, overwrite = true)
                 }
+
                 else -> {
                     require(files.all { it.extension == "properties" }) {
                         "Only .properties files are supported, but found: ${files.map { it.name }}"
@@ -170,13 +160,34 @@ tasks.jar {
         into("assets/bundles/")
     }
 
-    from("ide/assets/") {
+    from("minddev/assets/") {
         exclude("bundles/")
         into("assets/")
     }
     from("mlogix/assets/") {
         exclude("bundles/")
         into("assets/")
+    }
+
+    doLast {
+        val localProperties = Properties()
+        val localPropsFile = rootProject.file("local.properties")
+        if (localPropsFile.exists()) {
+            localProperties.load(localPropsFile.inputStream())
+        }
+
+        localProperties.getProperty("modsDir")?.let {
+            val targetDir = file(it)
+            if (!targetDir.exists()) {
+                println("Directory not found: $targetDir")
+                return@let
+            }
+            copy {
+                from(archiveFile.get())
+                into(targetDir)
+            }
+            println("JAR has been copied to: ${targetDir.absolutePath}")
+        }
     }
 }
 

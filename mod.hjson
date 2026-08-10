@@ -1,20 +1,15 @@
-#the mod name as displayed in-game
-displayName: "Mind Dev"
+displayName: "MindDev"
 
-#the internal name of your mod
-name: "mind-dev"
+name: "minddev"
 
-#your name
 author: "Kaleinova"
 
-#the fully qualified main class of the mod
-main: "minddev.ide.MindDevMod"
+main: "minddev.MindDevMod"
 
-#the mod description as seen in the mod dialog
 description: ""
 
-#the mod version
 version: 0.1
 
-#the minimum game build required to run this mod
 minGameVersion: 159
+
+hidden: true

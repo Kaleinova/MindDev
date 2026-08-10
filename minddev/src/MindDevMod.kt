@@ -1,4 +1,4 @@
-package minddev.ide
+package minddev
 
 import arc.*
 import arc.util.*
