@@ -1,4 +1,4 @@
-package example
+package minddev.ide
 
 import arc.*
 import arc.util.*
@@ -6,7 +6,7 @@ import mindustry.game.EventType.*
 import mindustry.mod.*
 import mindustry.ui.dialogs.*
 
-class ExampleKotlinMod : Mod(){
+class MindDevMod : Mod(){
 
     init{
         Log.info("Loaded ExampleKotlinMod constructor.")
