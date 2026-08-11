@@ -1,29 +1,66 @@
-# Mindustry Kotlin Mod Template
-A Kotlin Mindustry mod that works on Android and PC. This is equivalent to the [Java](https://github.com/Anuken/ExampleJavaMod) version, except in Kotlin.
+# Mindustry MindDev
 
-## Building for Desktop Testing
+**中文** | [English](README_en.md)
 
-1. Install JDK 17.
-2. Run `gradlew jar` [1].
-3. Your mod jar will be in the `build/libs` directory. **Only use this version for testing on desktop. It will not work with Android.**
-To build an Android-compatible version, you need the Android SDK. You can either let Github Actions handle this, or set it up yourself. See steps below.
+一个同时兼容 Android 与 桌面端 的 [Mindustry](https://github.com/anuken/mindustry) 模组，提供一套逻辑编辑器。
 
-## Building through Github Actions
+目前仍在开发第一个版本。
 
-This repository is set up with Github Actions CI to automatically build the mod for you every commit. This requires a Github repository, for obvious reasons.
-To get a jar file that works for every platform, do the following:
-1. Make a Github repository with your mod name, and upload the contents of this repo to it. Perform any modifications necessary, then commit and push. 
-2. Check the "Actions" tab on your repository page. Select the most recent commit in the list. If it completed successfully, there should be a download link under the "Artifacts" section. 
-3. Click the download link (should be the name of your repo). Import the jar contained within in Mindustry. This version should work both on Android and Desktop.
+---
 
-## Building Locally
+## 内置高级语言：MLogiX
 
-Building locally takes more time to set up, but shouldn't be a problem if you've done Android development before.
-1. Download the Android SDK, unzip it and set the `ANDROID_HOME` environment variable to its location.
-2. Make sure you have API level 30 installed, as well as any recent version of build tools (e.g. 30.0.1)
-3. Add a build-tools folder to your PATH. For example, if you have `30.0.1` installed, that would be `$ANDROID_HOME/build-tools/30.0.1`.
-4. Run `gradlew deploy`. If you did everything correctlly, this will create a jar file in the `build/libs` directory that can be run on both Android and desktop. 
+**MLogiX** 旨在提供**便利的逻辑编辑**与**高等特性**。
 
---- 
+[语法（施工中）](mlogix/docs/grammar/index.md)
 
-*[1]* *On Linux/Mac it's `./gradlew`, but if you're using Linux I assume you know how to run executables properly anyway.*  
+---
+
+## 构建指南
+
+当你需要自行构建而非使用发行版时阅读。
+
+### 桌面端测试构建（仅 PC）
+
+适用于快速调试和本地试用，**生成的 `.jar` 文件无法在 Android 上运行**。
+
+1. 安装 **JDK 17**（或更高版本）。
+2. 在项目根目录下执行构建命令：
+    - **Windows**：`gradlew jar`
+    - **Linux / macOS**：`./gradlew jar`
+3. 构建完成后，模组文件位于 `build/libs/` 目录下。
+4. （可选）若已配置模组输出目录，构建时会自动将 `.jar` 复制到游戏模组文件夹中。
+
+**配置自动复制：**  
+在项目根目录创建 `local.properties` 文件，添加如下内容（注意路径中的反斜杠需转义）：
+```properties
+modsDir=C:\\Users\\用户名\\AppData\\Roaming\\Mindustry\\mods
+```
+*（Linux / macOS 示例：`modsDir=/home/用户名/.local/share/Mindustry/mods`）*
+
+---
+
+### 部署构建（Android + 桌面）
+
+此版本生成的 `.jar` 可同时在 **Android** 和 **桌面端** 运行，但需要额外配置 Android 开发环境。
+
+**前置要求：**
+
+- **Android SDK**
+- **API 级别 30**
+- **任一版本的 Build Tools**（例如 `30.0.1` 或更新版本）
+
+1. 下载并解压 Android SDK，设置环境变量 `ANDROID_HOME` 指向解压目录。  
+   （例如：`C:\Android\sdk` 或 `/home/用户名/Android/Sdk`）
+2. 确保已安装 **API 30** 和 **Build Tools**（如 `30.0.1`）。
+3. 将 `$ANDROID_HOME/build-tools/版本号/`（如 `30.0.1`）添加到系统的 `PATH` 环境变量中。
+4. 在项目根目录运行部署命令：
+    - **Windows**：`gradlew deploy`
+    - **Linux / macOS**：`./gradlew deploy`
+5. 若配置无误，生成的 `jar` 文件将出现在 `build/libs/` 中，该文件可直接用于 **Android 设备** 和 **PC 端**。
+
+---
+
+### 贡献 & 反馈
+
+欢迎提交 Issue 或 Pull Request，帮助改进本项目！
