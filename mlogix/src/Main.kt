@@ -1,37 +1,41 @@
-package mlogix;
+package mlogix
 
-import arc.files.Fi;
-import mlogix.compiler.Compiler;
-import mlogix.util.*;
-import mlogix.util.Log;
+import arc.files.Fi
+import arc.util.I18NBundle
+import mlogix.compiler.Compiler
+import mlogix.util.I18N
+import mlogix.util.Log
 
-public class Main {
-    public static void main(String[] args) {
-        if (args.length == 0) {
-            System.out.println("未传入参数");
-            return;
+object Main {
+    @JvmStatic
+    fun main(args: Array<String>) {
+        if (args.isEmpty()) {
+            println("未传入参数")
+            return
         }
 
-        if (args.length >= 2) {
-            switch (args[1]) {
-                case "d":
-                    Log.setLevel(Log.LogType.DEBUG);
-                    break;
+        if (args.size >= 2) {
+            when (args[1]) {
+                "d" -> Log.setLevel(Log.LogType.DEBUG)
             }
         }
 
-        switch (args[0]) {
-            case "c":
-                compile();
-                break;
+        when (args[0]) {
+            "c" -> compile()
         }
     }
 
-    static void compile() {
-        // 获取当前工作目录
-        Fi projectDirectory = Fi.get(System.getProperty("user.dir"));
+    fun compile() {
+        val projectDirectory = Fi.get(System.getProperty("user.dir"))
+        initI18N(projectDirectory)
 
-        Compiler compiler = new Compiler(projectDirectory);
-        boolean result = compiler.compile();
+        // 获取当前工作目录
+
+        val compiler = Compiler(projectDirectory)
+        val result = compiler.compile()
+    }
+
+    private fun initI18N(dir: Fi) {
+        I18N.bundle = I18NBundle.createBundle(dir.child("assets/bundles/bundle"))
     }
 }
