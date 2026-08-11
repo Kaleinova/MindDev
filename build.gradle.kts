@@ -121,9 +121,9 @@ tasks.register<DefaultTask>("mergeBundleProperties") {
                     }
                     val merged = Properties()
                     files.forEach { file ->
-                        file.inputStream().use { ins ->
+                        file.bufferedReader(Charsets.UTF_8).use { reader ->
                             val props = Properties()
-                            props.load(ins)
+                            props.load(reader)
                             props.keys.forEach { key ->
                                 if (merged.containsKey(key)) {
                                     logger.warn(
@@ -135,8 +135,11 @@ tasks.register<DefaultTask>("mergeBundleProperties") {
                             merged.putAll(props)
                         }
                     }
-                    outputFile.writer().use { writer ->
-                        merged.store(writer, "Merged bundle.properties")
+                    outputFile.bufferedWriter(Charsets.UTF_8).use { writer ->
+                        writer.write("# Merged bundle.properties\n")
+                        merged.forEach { (key, value) ->
+                            writer.write("$key=$value\n")
+                        }
                     }
                 }
             }
@@ -159,16 +162,14 @@ tasks.jar {
     }
 
     from(mergedBundlesRoot) {
-        into("assets/bundles/")
+        into("bundles/")
     }
 
     from("minddev/assets/") {
         exclude("bundles/")
-        into("assets/")
     }
     from("mlogix/assets/") {
         exclude("bundles/")
-        into("assets/")
     }
 
     doLast {
