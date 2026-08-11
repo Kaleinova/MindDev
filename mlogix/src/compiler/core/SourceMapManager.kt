@@ -126,16 +126,15 @@ class SourceMapManager(/* 项目根目录 */val projectPath: Fi) {
         fun getLine(charIndex: Int): Int {
             var low = 0
             var high = lineOffsetList.size - 1
-            var mid = 0
             while (low <= high) {
-                mid = (low + high) ushr 1
+                val mid = (low + high) ushr 1
                 if (lineOffsetList[mid] <= charIndex) {
                     low = mid + 1
                 } else {
                     high = mid - 1
                 }
             }
-            return mid
+            return low - 1
         }
 
         /**
