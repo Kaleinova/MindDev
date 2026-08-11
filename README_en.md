@@ -25,9 +25,7 @@ Read this when you need to build manually rather than using a release version.
 Suitable for fast debugging and local trials. **The generated `.jar` file will not run on Android**.
 
 1. Install **JDK 17** (or higher).
-2. Run the build command in the project root directory:
-    - **Windows**: `gradlew jar`
-    - **Linux / macOS**: `./gradlew jar`
+2. Run the build command in the project root directory `./gradlew jar`
 3. After the build completes, the mod file is located in the `build/libs/` directory.
 4. (Optional) If you have configured a mod output directory, the `.jar` will be automatically copied to the game's mod folder during build.
 
@@ -54,9 +52,7 @@ This version generates a `.jar` that works on both **Android** and **desktop**, 
    (e.g., `C:\Android\sdk` or `/home/YourUsername/Android/Sdk`)
 2. Ensure that **API 30** and **Build Tools** (e.g., `30.0.1`) are installed.
 3. Add `$ANDROID_HOME/build-tools/version/` (e.g., `30.0.1`) to your system `PATH` environment variable.
-4. Run the deployment command in the project root:
-    - **Windows**: `gradlew deploy`
-    - **Linux / macOS**: `./gradlew deploy`
+4. Run the deployment command in the project root `./gradlew deploy`
 5. If configured correctly, the generated `jar` file will appear in `build/libs/` and can be used directly on **Android devices** and **PC**.
 
 ---
