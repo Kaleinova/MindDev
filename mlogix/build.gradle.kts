@@ -17,18 +17,26 @@ sourceSets {
 }
 
 configurations {
+    create("mindustryBase") {
+        isCanBeResolved = false
+        isCanBeConsumed = false
+    }
+
     create("debugRuntime") {
+        extendsFrom(configurations["mindustryBase"])
         isCanBeResolved = true
         isCanBeConsumed = false
     }
+
+    compileOnly.get().extendsFrom(configurations["mindustryBase"])
+
+    testImplementation.get().extendsFrom(configurations["mindustryBase"])
 }
 
 dependencies {
     val dependency =
         if (mindustryVersion == "be") "Anuken:MindustryBuilds:latest" else "Anuken:Mindustry:$mindustryVersion"
-    compileOnly(dependency)
-
-    add("debugRuntime", dependency)
+    add("mindustryBase", dependency)
 
     testImplementation(platform("org.junit:junit-bom:5.10.1"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
