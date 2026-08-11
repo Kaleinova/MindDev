@@ -89,7 +89,6 @@ tasks.register<DefaultTask>("mergeBundleProperties") {
     val mlogixDir = file("mlogix/assets/bundles")
     inputs.dir(minddevDir).withPropertyName("minddevBundleDir")
     inputs.dir(mlogixDir).withPropertyName("mlogixBundleDir")
-    // 输出声明（使用 project.layout）
     outputs.dir(mergedBundlesRoot)
 
     doLast {
@@ -136,7 +135,7 @@ tasks.register<DefaultTask>("mergeBundleProperties") {
                         }
                     }
                     outputFile.bufferedWriter(Charsets.UTF_8).use { writer ->
-                        writer.write("# Merged bundle.properties\n")
+                        writer.write("# Merged ${files[0].name}\n")
                         merged.forEach { (key, value) ->
                             writer.write("$key=$value\n")
                         }
