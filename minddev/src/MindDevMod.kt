@@ -20,9 +20,9 @@ class MindDevMod : Mod() {
 
             //show dialog upon startup
             Time.runTask(10f) {
-                BaseDialog("frog").apply {
+                BaseDialog(Core.bundle.format("diag.use-fullwidth-char", "！")).apply {
                     cont.apply {
-                        add("behold").row()
+                        add(Core.bundle.format("diag.use-fullwidth-char.help", "!")).row()
                         //mod sprites are prefixed with the mod name (this mod is called 'example-kotlin-mod' in its config)
                         image(Core.atlas.find("example-kotlin-mod-frog")).pad(20f).row()
                         button("I see") { hide() }.size(100f, 50f)

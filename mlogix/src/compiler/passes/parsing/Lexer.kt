@@ -11,6 +11,7 @@ import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.diagnostic.Problem
 import mlogix.compiler.diagnostic.Problem.LexerProblem
 import mlogix.compiler.diagnostic.ProblemCollector
+import mlogix.util.I18N.bundle
 import java.util.Locale.getDefault
 import kotlin.math.min
 
@@ -172,8 +173,8 @@ class Lexer(private val problems: ProblemCollector) {
                 }
 
                 '！' -> {
-                    error("应该使用英文符号`!`")
-                        .point(start, start + 1, "")
+                    error(bundle.format("diag.use-fullwidth-char", "！"))
+                        .point(start, start + 1, bundle.format("diag.use-fullwidth-char.help", "!"))
                     return if (match('=')) {
                         if (match('=')) {
                             token(TokenType.BANG_EQ_EQ)
