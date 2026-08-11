@@ -150,7 +150,9 @@ tasks.jar {
 
     dependsOn("mergeBundleProperties")
 
-    from(configurations.runtimeClasspath.map { config -> config.map { if (it.isDirectory) it else zipTree(it) } })
+    from(configurations.runtimeClasspath.map { config -> config.map { if (it.isDirectory) it else zipTree(it) } }) {
+        exclude("mlogix/Main.class")
+    }
 
     from(rootDir) {
         include("mod.hjson")
