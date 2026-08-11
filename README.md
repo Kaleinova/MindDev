@@ -22,7 +22,10 @@
 
 ### 测试 MLogiX 编译器
 
-1. 基本测试 `gradlew jar`
+- 基本测试：运行 `./gradlew test`
+- 测试具体源码:
+  1. 在 `mlogix` 模块下创建文件 `test.mlx` 并写入测试源码。
+  2. 运行 `./gradlew compile` 或 `./gradlew compile-debug`
 
 ### 桌面端测试构建（仅 PC）
 

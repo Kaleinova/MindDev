@@ -20,6 +20,13 @@ The first version is still under development.
 
 Read this when you need to build manually rather than using a release version.
 
+### Test MLogiX Compiler
+
+- Basic test: run `./gradlew test`
+- Test specific source code:
+   1. Create the file `test.mlx` under the `mlogix` module and write your test source code in it.
+   2. Run `./gradlew compile` or `./gradlew compile-debug`
+
 ### Desktop Test Build (PC only)
 
 Suitable for fast debugging and local trials. **The generated `.jar` file will not run on Android**.
