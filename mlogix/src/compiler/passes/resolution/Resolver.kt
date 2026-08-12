@@ -56,7 +56,7 @@ class Resolver(private val problems: DiagCollector) {
             BuiltinType.Null, BuiltinType.Array, BuiltinType.Fn, BuiltinType.Ref,
         )
         for (type in builtins) {
-            val symbol = symbolTable.declare(type.name, type, Span(0, 0))
+            val symbol = symbolTable.declare(type.name, type, Span(sourceMap.index, 0, 0))
             scope.bind(type.name, symbol.id)
         }
     }

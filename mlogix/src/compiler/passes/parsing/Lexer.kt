@@ -746,7 +746,7 @@ class Lexer(private val problems: DiagCollector) {
     }
 
     private fun token(type: TokenType, literal: Any? = null): Token {
-        val span = Span(start, current)
+        val span = Span(sourceMap.index, start, current)
 
 //        if (Log.isAllowed(Log.LogType.DEBUG)) {
 //            val lineAndCol: IntArray? = sourceMap.getLineAndCol(start)
@@ -768,7 +768,7 @@ class Lexer(private val problems: DiagCollector) {
     // EOF特化
     private fun eofToken(): Token {
         // 特化部分:current -> start
-        val span = Span(start, start)
+        val span = Span(sourceMap.index, start, start)
 
 //        if (Log.isAllowed(Log.LogType.DEBUG)) {
 //            val lineAndCol = sourceMap.getLineAndCol(start)

@@ -203,7 +203,7 @@ class TypeSolver(private val problems: DiagCollector, private val sourceMap: Sou
             Diagnostic.DiagLevel.ERROR,
         )
         problems.addError(e)
-        e.point(pos ?: Span(0, 0), "实际类型: ${t1.pretty()}")
+        e.point(pos ?: Span(sourceMap.index, 0, 0), "实际类型: ${t1.pretty()}")
         if (declPos != null) {
             e.info(declPos, "期望类型: ${t2.pretty()}")
         }
@@ -212,7 +212,7 @@ class TypeSolver(private val problems: DiagCollector, private val sourceMap: Sou
     private fun report(text: String, pos: Span?, declPos: Span?) {
         val e = Diagnostic.SemanticDiag(sourceMap, text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
-        e.point(pos ?: Span(0, 0), "使用方")
+        e.point(pos ?: Span(sourceMap.index, 0, 0), "使用方")
         if (declPos != null) {
             e.info(declPos, "声明方")
         }

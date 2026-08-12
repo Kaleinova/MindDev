@@ -138,7 +138,7 @@ class DiagTest{
         Log.info("Running testPointMethodWithToken...");
         SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
 
-        Span span = new Span(0, 4);
+        Span span = new Span(0, 0, 4);
         Token token = new Token(span, TokenType.IDENTIFIER, "test");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
@@ -185,7 +185,7 @@ class DiagTest{
         Log.info("Running testInfoMethodWithToken...");
         SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
 
-        Span span = new Span(0, 4);
+        Span span = new Span(0, 0, 4);
         Token token = new Token(span, TokenType.IDENTIFIER, "test");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
