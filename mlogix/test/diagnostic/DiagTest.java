@@ -44,7 +44,7 @@ class DiagTest{
             Log.error("FAILED: mlogix.diagnostic should not be null");
             return;
         }
-        if (!"Test Lexer Error".equals(diag.getDiagName())) {
+        if (!"Test Lexer Error".equals(diag.getMessage())) {
             Log.error("FAILED: diagName should be 'Test Lexer Error'");
             return;
         }
@@ -69,7 +69,7 @@ class DiagTest{
             Log.error("FAILED: mlogix.diagnostic should not be null");
             return;
         }
-        if (!"Test Parser Warning".equals(diag.getDiagName())) {
+        if (!"Test Parser Warning".equals(diag.getMessage())) {
             Log.error("FAILED: diagName should be 'Test Parser Warning'");
             return;
         }
@@ -94,7 +94,7 @@ class DiagTest{
             Log.error("FAILED: mlogix.diagnostic should not be null");
             return;
         }
-        if (!"Test Semantic Error".equals(diag.getDiagName())) {
+        if (!"Test Semantic Error".equals(diag.getMessage())) {
             Log.error("FAILED: diagName should be 'Test Semantic Error'");
             return;
         }
