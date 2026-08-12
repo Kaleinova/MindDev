@@ -5,7 +5,7 @@
 /android/libs/x86/
 /android/libs/x86_64/
 /android/gen/
-/.idea/
+/.idea/*
 !/.idea/dictionaries/
 !/.idea/codeStyles/
 *.ipr
@@ -53,3 +53,5 @@ gradle-app.setting
 /.kotlin/
 /minddev/build/
 /mlogix/build/
+
+TODO*.md
