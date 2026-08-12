@@ -12,9 +12,9 @@ import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
-import mlogix.compiler.diagnostic.Problem
-import mlogix.compiler.diagnostic.Problem.SemanticProblem
-import mlogix.compiler.diagnostic.ProblemCollector
+import mlogix.compiler.diagnostic.Diagnostic
+import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
+import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.compiler.ir.ResolutionResult
 
 /**
@@ -26,7 +26,7 @@ import mlogix.compiler.ir.ResolutionResult
  *
  * 一个项目 一次构造；一个文件 一次 [analyze]。
  */
-class TypeInferencer(val problems: ProblemCollector) {
+class TypeInferencer(val problems: DiagCollector) {
     private lateinit var sourceMap: SourceMap
     private lateinit var symbolTable: SymbolTable
     private lateinit var solver: TypeSolver
@@ -553,15 +553,15 @@ class TypeInferencer(val problems: ProblemCollector) {
     }
 
     // 错误
-    private fun error(name: String): SemanticProblem {
-        val e = SemanticProblem(sourceMap, name, Problem.ProblemLevel.ERROR)
+    private fun error(name: String): SemanticDiag {
+        val e = SemanticDiag(sourceMap, name, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }
 
     // 警告
-    private fun warning(name: String): SemanticProblem {
-        val w = SemanticProblem(sourceMap, name, Problem.ProblemLevel.WARNING)
+    private fun warning(name: String): SemanticDiag {
+        val w = SemanticDiag(sourceMap, name, Diagnostic.DiagLevel.WARNING)
         problems.addWarning(w)
         return w
     }

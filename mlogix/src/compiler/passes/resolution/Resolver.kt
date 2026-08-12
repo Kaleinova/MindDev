@@ -11,9 +11,9 @@ import mlogix.compiler.core.symbol.SymbolTable
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeScheme
-import mlogix.compiler.diagnostic.Problem
-import mlogix.compiler.diagnostic.Problem.SemanticProblem
-import mlogix.compiler.diagnostic.ProblemCollector
+import mlogix.compiler.diagnostic.Diagnostic
+import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
+import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.compiler.ir.ResolutionResult
 import arc.struct.Seq
 
@@ -29,7 +29,7 @@ import arc.struct.Seq
  * 内置类型（Int/Num/Str/Bool/Null/Array/Fn/Ref）预置进全局作用域（prelude），
  * 因此类型注解里的名字也能被解析。
  */
-class Resolver(private val problems: ProblemCollector) {
+class Resolver(private val problems: DiagCollector) {
     private lateinit var sourceMap: SourceMap
     private lateinit var symbolTable: SymbolTable
     private lateinit var rootScope: Scope
@@ -296,8 +296,8 @@ class Resolver(private val problems: ProblemCollector) {
         return symbol
     }
 
-    private fun error(text: String): SemanticProblem {
-        val e = SemanticProblem(sourceMap, text, Problem.ProblemLevel.ERROR)
+    private fun error(text: String): SemanticDiag {
+        val e = SemanticDiag(sourceMap, text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }

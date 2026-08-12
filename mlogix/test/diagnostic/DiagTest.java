@@ -4,121 +4,121 @@ import mlogix.compiler.core.SourceMapManager.SourceMap;
 import mlogix.compiler.core.span.Span;
 import mlogix.compiler.core.token.Token;
 import mlogix.compiler.core.token.TokenType;
-import mlogix.compiler.diagnostic.Problem;
+import mlogix.compiler.diagnostic.Diagnostic;
 import mlogix.util.Log;
 
-class ProblemTest {
+class DiagTest{
 
     public static void main(String[] args) {
         Log.setLevel(Log.LogType.DEBUG);
-        Log.info("=== Starting ProblemTest ===");
+        Log.info("=== Starting DiagTest ===");
 
-        testLexerProblemCreation();
-        testParserProblemCreation();
-        testSemanticProblemCreation();
+        testLexerDiagCreation();
+        testParserDiagCreation();
+        testSemanticDiagCreation();
         testPointMethodWithPositions();
         testPointMethodWithToken();
         testInfoMethodWithPositions();
         testInfoMethodWithToken();
         testMultiplePointsOnSameLine();
         testMultipleLines();
-        testProblemLevelEnum();
+        testDiagLevelEnum();
         testChainedPointAndInfo();
         testToStringWithEmptyLineList();
-        testProblemExtendsRuntimeException();
+        testDiagExtendsRuntimeException();
 
         Log.info("=== All tests completed ===");
     }
 
-    static void testLexerProblemCreation() {
-        Log.info("Running testLexerProblemCreation...");
+    static void testLexerDiagCreation() {
+        Log.info("Running testLexerDiagCreation...");
         SourceMap sourceMap = new SourceMap("test line 1\ntest line 2\ntest line 3");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Test Lexer Error",
-            Problem.ProblemLevel.ERROR
+            Diagnostic.DiagLevel.ERROR
         );
 
-        if (problem == null) {
+        if (diag == null) {
             Log.error("FAILED: mlogix.diagnostic should not be null");
             return;
         }
-        if (!"Test Lexer Error".equals(problem.getProblemName())) {
-            Log.error("FAILED: problemName should be 'Test Lexer Error'");
+        if (!"Test Lexer Error".equals(diag.getDiagName())) {
+            Log.error("FAILED: diagName should be 'Test Lexer Error'");
             return;
         }
-        if (problem.getLevel() != Problem.ProblemLevel.ERROR) {
+        if (diag.getLevel() != Diagnostic.DiagLevel.ERROR) {
             Log.error("FAILED: level should be ERROR");
             return;
         }
-        Log.info("PASSED: testLexerProblemCreation");
+        Log.info("PASSED: testLexerDiagCreation");
     }
 
-    static void testParserProblemCreation() {
-        Log.info("Running testParserProblemCreation...");
+    static void testParserDiagCreation() {
+        Log.info("Running testParserDiagCreation...");
         SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
 
-        Problem.ParserProblem problem = new Problem.ParserProblem(
+        Diagnostic.ParserDiag diag = new Diagnostic.ParserDiag(
             sourceMap,
             "Test Parser Warning",
-            Problem.ProblemLevel.WARNING
+            Diagnostic.DiagLevel.WARNING
         );
 
-        if (problem == null) {
+        if (diag == null) {
             Log.error("FAILED: mlogix.diagnostic should not be null");
             return;
         }
-        if (!"Test Parser Warning".equals(problem.getProblemName())) {
-            Log.error("FAILED: problemName should be 'Test Parser Warning'");
+        if (!"Test Parser Warning".equals(diag.getDiagName())) {
+            Log.error("FAILED: diagName should be 'Test Parser Warning'");
             return;
         }
-        if (problem.getLevel() != Problem.ProblemLevel.WARNING) {
+        if (diag.getLevel() != Diagnostic.DiagLevel.WARNING) {
             Log.error("FAILED: level should be WARNING");
             return;
         }
-        Log.info("PASSED: testParserProblemCreation");
+        Log.info("PASSED: testParserDiagCreation");
     }
 
-    static void testSemanticProblemCreation() {
-        Log.info("Running testSemanticProblemCreation...");
+    static void testSemanticDiagCreation() {
+        Log.info("Running testSemanticDiagCreation...");
         SourceMap sourceMap = new SourceMap("test line 1");
 
-        Problem.SemanticProblem problem = new Problem.SemanticProblem(
+        Diagnostic.SemanticDiag diag = new Diagnostic.SemanticDiag(
             sourceMap,
             "Test Semantic Error",
-            Problem.ProblemLevel.ERROR
+            Diagnostic.DiagLevel.ERROR
         );
 
-        if (problem == null) {
+        if (diag == null) {
             Log.error("FAILED: mlogix.diagnostic should not be null");
             return;
         }
-        if (!"Test Semantic Error".equals(problem.getProblemName())) {
-            Log.error("FAILED: problemName should be 'Test Semantic Error'");
+        if (!"Test Semantic Error".equals(diag.getDiagName())) {
+            Log.error("FAILED: diagName should be 'Test Semantic Error'");
             return;
         }
-        if (problem.getLevel() != Problem.ProblemLevel.ERROR) {
+        if (diag.getLevel() != Diagnostic.DiagLevel.ERROR) {
             Log.error("FAILED: level should be ERROR");
             return;
         }
-        Log.info("PASSED: testSemanticProblemCreation");
+        Log.info("PASSED: testSemanticDiagCreation");
     }
 
     static void testPointMethodWithPositions() {
         Log.info("Running testPointMethodWithPositions...");
         SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Test Point",
-            Problem.ProblemLevel.ERROR
+            Diagnostic.DiagLevel.ERROR
         );
 
         // Point to "test" in line 1 (positions 0-4)
-        Problem result = problem.point(0, 4, "error here");
+        Diagnostic result = diag.point(0, 4, "error here");
 
-        if (problem != result) {
+        if (diag != result) {
             Log.error("FAILED: point should return the same mlogix.diagnostic instance");
             return;
         }
@@ -141,15 +141,15 @@ class ProblemTest {
         Span span = new Span(0, 0, 4);
         Token token = new Token(span, TokenType.IDENTIFIER, "test");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Test Token Point",
-            Problem.ProblemLevel.ERROR
+            Diagnostic.DiagLevel.ERROR
         );
 
-        Problem result = problem.point(token, "token error");
+        Diagnostic result = diag.point(token, "token error");
 
-        if (problem != result) {
+        if (diag != result) {
             Log.error("FAILED: point should return the same mlogix.diagnostic instance");
             return;
         }
@@ -161,15 +161,15 @@ class ProblemTest {
         Log.info("Running testInfoMethodWithPositions...");
         SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Test Info",
-            Problem.ProblemLevel.WARNING
+            Diagnostic.DiagLevel.WARNING
         );
 
-        Problem result = problem.info(0, 4, "info here");
+        Diagnostic result = diag.info(0, 4, "info here");
 
-        if (problem != result) {
+        if (diag != result) {
             Log.error("FAILED: info should return the same mlogix.diagnostic instance");
             return;
         }
@@ -188,15 +188,15 @@ class ProblemTest {
         Span span = new Span(0, 0, 4);
         Token token = new Token(span, TokenType.IDENTIFIER, "test");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Test Token Info",
-            Problem.ProblemLevel.WARNING
+            Diagnostic.DiagLevel.WARNING
         );
 
-        Problem result = problem.info(token, "token info");
+        Diagnostic result = diag.info(token, "token info");
 
-        if (problem != result) {
+        if (diag != result) {
             Log.error("FAILED: info should return the same mlogix.diagnostic instance");
             return;
         }
@@ -208,16 +208,16 @@ class ProblemTest {
         Log.info("Running testMultiplePointsOnSameLine...");
         SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Multiple Points",
-            Problem.ProblemLevel.ERROR
+            Diagnostic.DiagLevel.ERROR
         );
 
-        problem.point(0, 4, "first error");
-        problem.point(5, 9, "second error");
+        diag.point(0, 4, "first error");
+        diag.point(5, 9, "second error");
 
-        String result = problem.toString();
+        String result = diag.toString();
         if (!result.contains("first error")) {
             Log.error("FAILED: toString should contain 'first error'");
             return;
@@ -233,17 +233,17 @@ class ProblemTest {
         Log.info("Running testMultipleLines...");
         SourceMap sourceMap = new SourceMap("line 1\nline 2\nline 3");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Multiple Lines",
-            Problem.ProblemLevel.ERROR
+            Diagnostic.DiagLevel.ERROR
         );
 
-        problem.point(0, 4, "error on line 1");
-        problem.point(7, 11, "error on line 2");
-        problem.point(14, 18, "error on line 3");
+        diag.point(0, 4, "error on line 1");
+        diag.point(7, 11, "error on line 2");
+        diag.point(14, 18, "error on line 3");
 
-        String result = problem.toString();
+        String result = diag.toString();
         if (!result.contains("error on line 1")) {
             Log.error("FAILED: toString should contain 'error on line 1'");
             return;
@@ -259,34 +259,34 @@ class ProblemTest {
         Log.info("PASSED: testMultipleLines");
     }
 
-    static void testProblemLevelEnum() {
-        Log.info("Running testProblemLevelEnum...");
-        if (Problem.ProblemLevel.getEntries().size() != 2) {
-            Log.error("FAILED: ProblemLevel should have 2 values");
+    static void testDiagLevelEnum() {
+        Log.info("Running testDiagLevelEnum...");
+        if (Diagnostic.DiagLevel.getEntries().size() != 2) {
+            Log.error("FAILED: DiagLevel should have 2 values");
             return;
         }
-        if (Problem.ProblemLevel.valueOf("WARNING") != Problem.ProblemLevel.WARNING) {
+        if (Diagnostic.DiagLevel.valueOf("WARNING") != Diagnostic.DiagLevel.WARNING) {
             Log.error("FAILED: valueOf('WARNING') should return WARNING");
             return;
         }
-        if (Problem.ProblemLevel.valueOf("ERROR") != Problem.ProblemLevel.ERROR) {
+        if (Diagnostic.DiagLevel.valueOf("ERROR") != Diagnostic.DiagLevel.ERROR) {
             Log.error("FAILED: valueOf('ERROR') should return ERROR");
             return;
         }
-        Log.info("PASSED: testProblemLevelEnum");
+        Log.info("PASSED: testDiagLevelEnum");
     }
 
     static void testChainedPointAndInfo() {
         Log.info("Running testChainedPointAndInfo...");
         SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Chained Methods",
-            Problem.ProblemLevel.ERROR
+            Diagnostic.DiagLevel.ERROR
         );
 
-        String result = problem.point(0, 4, "error")
+        String result = diag.point(0, 4, "error")
                               .info(5, 9, "info")
                               .toString();
 
@@ -305,13 +305,13 @@ class ProblemTest {
         Log.info("Running testToStringWithEmptyLineList...");
         SourceMap sourceMap = new SourceMap("test line");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Empty Line List",
-            Problem.ProblemLevel.ERROR
+            Diagnostic.DiagLevel.ERROR
         );
 
-        String result = problem.toString();
+        String result = diag.toString();
         if (!result.contains("ERROR")) {
             Log.error("FAILED: toString should contain 'ERROR'");
             return;
@@ -323,16 +323,16 @@ class ProblemTest {
         Log.info("PASSED: testToStringWithEmptyLineList");
     }
 
-    static void testProblemExtendsRuntimeException() {
-        Log.info("Running testProblemExtendsRuntimeException...");
+    static void testDiagExtendsRuntimeException() {
+        Log.info("Running testDiagExtendsRuntimeException...");
         SourceMap sourceMap = new SourceMap("test");
 
-        Problem.LexerProblem problem = new Problem.LexerProblem(
+        Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
             sourceMap,
             "Test Exception",
-            Problem.ProblemLevel.ERROR
+            Diagnostic.DiagLevel.ERROR
         );
 
-        Log.info("PASSED: testProblemExtendsRuntimeException");
+        Log.info("PASSED: testDiagExtendsRuntimeException");
     }
 }

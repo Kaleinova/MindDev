@@ -9,7 +9,7 @@ import mlogix.compiler.ir.ResolutionResult
  * 类型推断 Pass：将现有 [TypeInferencer]（约束生成 + 惰性求解）包装为统一 Pass 契约。
  *
  * 输入/输出均为 Resolver 产出的 [ResolutionResult]；类型推断的副作用
- * （求解结果写回 [ResolutionResult.symbolTable]、错误写入 ProblemCollector）
+ * （求解结果写回 [ResolutionResult.symbolTable]、错误写入 DiagCollector）
  * 发生在 [TypeInferencer.analyze] 内部。
  */
 class TypeInferencePass(

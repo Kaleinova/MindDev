@@ -3,15 +3,15 @@ package mlogix.compiler.diagnostic
 import arc.struct.Seq
 import arc.util.Log
 
-class ProblemCollector {
-    val errors = Seq<Problem>()
-    val warnings = Seq<Problem>()
+class DiagCollector {
+    val errors = Seq<Diagnostic>()
+    val warnings = Seq<Diagnostic>()
 
-    fun createSnapshot(): ProblemCollectorSnapshot {
-        return ProblemCollectorSnapshot(errorNum(), warningNum())
+    fun createSnapshot(): DiagCollectorSnapshot {
+        return DiagCollectorSnapshot(errorNum(), warningNum())
     }
 
-    fun restoreSnapshot(snapshot: ProblemCollectorSnapshot) {
+    fun restoreSnapshot(snapshot: DiagCollectorSnapshot) {
         // Left closed and right closed
         if (snapshot.errorNum != errorNum()) {
             errors.removeRange(snapshot.errorNum, errorNum() - 1)
@@ -33,20 +33,20 @@ class ProblemCollector {
         return warnings.size
     }
 
-    fun addError(error: Problem) {
+    fun addError(error: Diagnostic) {
         errors.add(error)
     }
 
-    fun addWarning(warning: Problem) {
+    fun addWarning(warning: Diagnostic) {
         warnings.add(warning)
     }
 
     fun printError() {
-        errors.forEach { e: Problem -> Log.err(e.toString()) }
+        errors.forEach { e: Diagnostic -> Log.err(e.toString()) }
     }
 
     fun printWarning() {
-        warnings.forEach { w: Problem -> Log.warn(w.toString()) }
+        warnings.forEach { w: Diagnostic -> Log.warn(w.toString()) }
     }
 
     fun clear() {
@@ -54,5 +54,5 @@ class ProblemCollector {
         warnings.clear()
     }
 
-    data class ProblemCollectorSnapshot(val errorNum: Int, val warningNum: Int)
+    data class DiagCollectorSnapshot(val errorNum: Int, val warningNum: Int)
 }

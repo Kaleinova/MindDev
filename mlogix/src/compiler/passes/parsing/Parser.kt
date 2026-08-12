@@ -15,9 +15,9 @@ import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
-import mlogix.compiler.diagnostic.Problem
-import mlogix.compiler.diagnostic.Problem.ParserProblem
-import mlogix.compiler.diagnostic.ProblemCollector
+import mlogix.compiler.diagnostic.Diagnostic
+import mlogix.compiler.diagnostic.Diagnostic.ParserDiag
+import mlogix.compiler.diagnostic.DiagCollector
 import java.util.*
 
 /**
@@ -25,7 +25,7 @@ import java.util.*
  */
 class Parser(
     private val lexer: Lexer,
-    private val problems: ProblemCollector,
+    private val problems: DiagCollector,
 ) {
     private lateinit var sourceMap: SourceMap
     private lateinit var input: InputWindow
@@ -249,10 +249,10 @@ class Parser(
             // for repeatNum
             expr = expression()
         }
-        if (expect(TokenType.LBRACE) { e: Problem -> e.info(head, "`for`语句") } == null) {
+        if (expect(TokenType.LBRACE) { e: Diagnostic -> e.info(head, "`for`语句") } == null) {
             return ForStmt(between(start, prevToken), flag, varDecl, expr, null)
         }
-        if (expect(TokenType.LBRACE) { e: Problem -> e.info(head, "`for`语句") } == null) {
+        if (expect(TokenType.LBRACE) { e: Diagnostic -> e.info(head, "`for`语句") } == null) {
             when (recoverByTokenTree(EnumSet.of(TokenType.RBRACE))) {
                 TokenType.RBRACE -> error("不匹配的闭定界符").point(next(), "")
                 TokenType.EOF -> Unit
@@ -272,7 +272,7 @@ class Parser(
 
         val expr = expression()
 
-        if (expect(TokenType.LBRACE) { e: Problem -> e.info(head, "`while`语句") } == null) {
+        if (expect(TokenType.LBRACE) { e: Diagnostic -> e.info(head, "`while`语句") } == null) {
             when (recoverByTokenTree(EnumSet.of(TokenType.RBRACE))) {
                 TokenType.RBRACE -> error("不匹配的闭定界符").point(next(), "")
                 TokenType.EOF -> Unit
@@ -671,7 +671,7 @@ class Parser(
 
                     val index = expression()
                     val rBracket =
-                        consume(TokenType.RBRACKET) { e: Problem -> e.info(lBracket, "解析`数组索引`时出现错误") }
+                        consume(TokenType.RBRACKET) { e: Diagnostic -> e.info(lBracket, "解析`数组索引`时出现错误") }
 
                     expr = if (rBracket != null) {
                         Expr.Index(between(lBracket, rBracket), expr, index)
@@ -708,7 +708,7 @@ class Parser(
                     val dot = next()
 
                     val id =
-                        consume(TokenType.IDENTIFIER) { e: Problem ->
+                        consume(TokenType.IDENTIFIER) { e: Diagnostic ->
                             e.info(dot, "解析`类元素访问`时出现错误")
                         } ?: return expr
                     val field: Expr = Expr.Identifier(id)
@@ -818,19 +818,19 @@ class Parser(
      * @param elementProv 解析并返回一个序列元素，无法解析时请返回[ErrorExpr]/`null`以调用恢复，务必消耗元素，否则死循环
      * @param separators 分隔符，方法内已有自带的分隔符[matchStmtEnd]，可填`setOf()`以作空格
      * @param isSeparatorOptional 是否允许省略分隔符
-     * @param missSeparator 当`expect(end)`失败时使用missSeparator报错，方法自动调用[Problem.point]
+     * @param missSeparator 当`expect(end)`失败时使用missSeparator报错，方法自动调用[Diagnostic.point]
      * @param end 序列结束标志
      * @param consumeEnd 是否消耗[end]，`false`时不强求[end]出现
-     * @param missEnd 错误恢复到EOF时调用，[consumeEnd]为`false`时不使用，方法自动调用[Problem.point]
+     * @param missEnd 错误恢复到EOF时调用，[consumeEnd]为`false`时不使用，方法自动调用[Diagnostic.point]
      */
     private fun seq(
         elementProv: Prov<Expr?>,
         separators: EnumSet<TokenType>,
         isSeparatorOptional: Boolp,
-        missSeparator: Prov<Problem>,
+        missSeparator: Prov<Diagnostic>,
         end: TokenType,
         consumeEnd: Boolean,
-        missEnd: Prov<Problem>? = null,
+        missEnd: Prov<Diagnostic>? = null,
     ): Seq<Expr> {
         val seq = Seq<Expr>()
         while (!check(end)) {
@@ -1055,7 +1055,7 @@ class Parser(
     /**
      * 若下一个token不是指定类型的则返回null并报告错误并将错误输入Cons，否则返回该token。
      */
-    private fun expect(type: TokenType, cons: Cons<Problem>): Token? {
+    private fun expect(type: TokenType, cons: Cons<Diagnostic>): Token? {
         if (check(type)) return lookAhead(0)
 
         cons.get(
@@ -1107,7 +1107,7 @@ class Parser(
     /**
      * 若下一个token不是指定类型的则报告错误并返回null，否则返回该token并推进
      */
-    private fun consume(type: TokenType, cons: Cons<Problem>): Token? {
+    private fun consume(type: TokenType, cons: Cons<Diagnostic>): Token? {
         if (check(type)) return next()
 
         cons.get(
@@ -1130,7 +1130,7 @@ class Parser(
     //
     //    private Res<Token> consume(TokenType type, Runnable r) {
     //        if(check(type)) return new Ok<>(next());
-    //        Problem.ParserProblem e = (Problem.ParserProblem) error("期望字符").point(lookAhead(), type.toString());
+    //        Diagnostic.ParserDiag e = (Diagnostic.ParserDiag) error("期望字符").point(lookAhead(), type.toString());
     //        r.run();
     //        return new Err<>(e);
     //    }
@@ -1235,14 +1235,14 @@ class Parser(
         return Token(token.span, subType)
     }
 
-    private fun error(text: String): ParserProblem {
-        val e = ParserProblem(sourceMap, text, Problem.ProblemLevel.ERROR)
+    private fun error(text: String): ParserDiag {
+        val e = ParserDiag(sourceMap, text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }
 
-    private fun warning(text: String): ParserProblem {
-        val w = ParserProblem(sourceMap, text, Problem.ProblemLevel.WARNING)
+    private fun warning(text: String): ParserDiag {
+        val w = ParserDiag(sourceMap, text, Diagnostic.DiagLevel.WARNING)
         problems.addWarning(w)
         return w
     }
@@ -1299,6 +1299,6 @@ class Parser(
     private data class Snapshot(
         val inputSnapshot: InputWindow,
         val lexerSnapshot: Lexer.LexerSnapshot,
-        val problemsSnapshot: ProblemCollector.ProblemCollectorSnapshot
+        val problemsSnapshot: DiagCollector.DiagCollectorSnapshot
     )
 }

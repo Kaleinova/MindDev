@@ -7,8 +7,8 @@ import mlogix.compiler.core.SourceMapManager.SourceMap
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeVisitor
-import mlogix.compiler.diagnostic.Problem
-import mlogix.compiler.diagnostic.ProblemCollector
+import mlogix.compiler.diagnostic.Diagnostic
+import mlogix.compiler.diagnostic.DiagCollector
 
 /**
  * Union-Find（并查集）求解器：惰性求解 Equal 约束。
@@ -21,7 +21,7 @@ import mlogix.compiler.diagnostic.ProblemCollector
  * - **[Type.Error] / [Type.Unknown] 静默通过**：错误类型抑制级联错误，
  *   未定类型不与任何具体类型冲突。
  */
-class TypeSolver(private val problems: ProblemCollector, private val sourceMap: SourceMap) {
+class TypeSolver(private val problems: DiagCollector, private val sourceMap: SourceMap) {
     private val parent = IntMap<Int>()
     private val rootType = IntMap<Type>()
     private var counter = 0
@@ -190,17 +190,17 @@ class TypeSolver(private val problems: ProblemCollector, private val sourceMap: 
     }
 
     /**
-     * 类型不匹配报错：**同一个 Problem** 下打印双方类型。
+     * 类型不匹配报错：**同一个 Diagnostic** 下打印双方类型。
      *
      * - 消息正文列出双方：`期望 <声明方类型>, 实际 <使用方类型>`；
-     * - [Problem.point] 标记**使用方**（[pos]，实际类型来源处）；
-     * - [Problem.info] 标记**声明方**（[declPos]，期望类型声明处，可能为 null）。
+     * - [Diagnostic.point] 标记**使用方**（[pos]，实际类型来源处）；
+     * - [Diagnostic.info] 标记**声明方**（[declPos]，期望类型声明处，可能为 null）。
      */
     private fun reportMismatch(t1: Type, t2: Type, pos: Span?, declPos: Span?) {
-        val e = Problem.SemanticProblem(
+        val e = Diagnostic.SemanticDiag(
             sourceMap,
             "类型不匹配: 期望 ${t2.pretty()}, 实际 ${t1.pretty()}",
-            Problem.ProblemLevel.ERROR,
+            Diagnostic.DiagLevel.ERROR,
         )
         problems.addError(e)
         e.point(pos ?: Span(sourceMap.index, 0, 0), "实际类型: ${t1.pretty()}")
@@ -210,7 +210,7 @@ class TypeSolver(private val problems: ProblemCollector, private val sourceMap: 
     }
 
     private fun report(text: String, pos: Span?, declPos: Span?) {
-        val e = Problem.SemanticProblem(sourceMap, text, Problem.ProblemLevel.ERROR)
+        val e = Diagnostic.SemanticDiag(sourceMap, text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         e.point(pos ?: Span(sourceMap.index, 0, 0), "使用方")
         if (declPos != null) {

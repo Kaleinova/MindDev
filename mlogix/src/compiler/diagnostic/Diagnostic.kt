@@ -6,21 +6,21 @@ import mlogix.compiler.core.span.Spanned
 import mlogix.util.Ansi
 import kotlin.math.max
 
-// 用于表示编译器问题，包含错误和警告
-abstract class Problem(
-    val sourceMap: SourceMap,   // 这个问题所在文件
-    val problemName: String,    // 这个问题的名称
-    val level: ProblemLevel     // 问题级别（错误或警告）
+/** 用于表示编译器问题诊断，包含错误和警告 */
+abstract class Diagnostic(
+    val sourceMap: SourceMap, // 这个问题所在文件
+    val message: String,      // 这个问题的名称
+    val level: DiagLevel      // 问题级别
 ) {
     val lineInfos = Seq<LineInfo>(2)
     var centerLine = null as LineInfo?
 
-    fun point(obj: Spanned, text: String): Problem {
+    fun point(obj: Spanned, text: String): Diagnostic {
         val span = obj.span()
         return point(span.start, span.end, text)
     }
 
-    fun point(start: Int, end: Int, text: String): Problem {
+    fun point(start: Int, end: Int, text: String): Diagnostic {
         val line = sourceMap.getLine(start)
         val lineInfo = getLineInfo(line)
         if (centerLine == null) centerLine = lineInfo
@@ -34,12 +34,12 @@ abstract class Problem(
         return this
     }
 
-    fun info(obj: Spanned, text: String): Problem {
+    fun info(obj: Spanned, text: String): Diagnostic {
         val span = obj.span()
         return info(span.start, span.end, text)
     }
 
-    fun info(start: Int, end: Int, text: String): Problem {
+    fun info(start: Int, end: Int, text: String): Diagnostic {
         val lineInfo = getLineInfo(sourceMap.getLine(start))
         lineInfo.info(
             sourceMap.getCol(start),
@@ -60,8 +60,8 @@ abstract class Problem(
     }
 
     override fun toString(): String {
-        val color = if (level == ProblemLevel.ERROR) Ansi.RED else Ansi.YELLOW
-        val str = StringBuilder("$color${level.name.lowercase()}: $problemName${Ansi.DEFAULT}\n")
+        val color = if (level == DiagLevel.ERROR) Ansi.RED else Ansi.YELLOW
+        val str = StringBuilder("$color${level.name.lowercase()}: $message${Ansi.DEFAULT}\n")
         lineInfos.sort(Comparator.comparing { li -> li.line })
 
         var maxLineDigitLen = 0  // 所有 LineInfo 中最长的行号长度
@@ -83,21 +83,21 @@ abstract class Problem(
         return str.toString()
     }
 
-    enum class ProblemLevel {
+    enum class DiagLevel {
         WARNING, ERROR
     }
 
     /* Lexer产生的问题 */
-    class LexerProblem(sourceMap: SourceMap, problemName: String, level: ProblemLevel) :
-        Problem(sourceMap, problemName, level)
+    class LexerDiag(sourceMap: SourceMap, problemName: String, level: DiagLevel) :
+        Diagnostic(sourceMap, problemName, level)
 
     /* Parser产生的问题 */
-    class ParserProblem(sourceMap: SourceMap, problemName: String, level: ProblemLevel) :
-        Problem(sourceMap, problemName, level)
+    class ParserDiag(sourceMap: SourceMap, problemName: String, level: DiagLevel) :
+        Diagnostic(sourceMap, problemName, level)
 
     /* SemanticAnalyzer产生的问题 */
-    class SemanticProblem(sourceMap: SourceMap, problemName: String, level: ProblemLevel) :
-        Problem(sourceMap, problemName, level)
+    class SemanticDiag(sourceMap: SourceMap, problemName: String, level: DiagLevel) :
+        Diagnostic(sourceMap, problemName, level)
 
     /**
      * @param col 从1开始

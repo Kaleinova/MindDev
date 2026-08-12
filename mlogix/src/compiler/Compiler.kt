@@ -8,7 +8,7 @@ import mlogix.compiler.ast.ASTPrinter
 import mlogix.compiler.core.CompilerConfig
 import mlogix.compiler.core.SourceMapManager
 import mlogix.compiler.core.SourceMapManager.SourceMap
-import mlogix.compiler.diagnostic.ProblemCollector
+import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.compiler.ir.ResolutionResult
 import mlogix.compiler.passes.parsing.Lexer
 import mlogix.compiler.passes.parsing.Parser
@@ -24,7 +24,7 @@ import java.io.IOException
 
 class Compiler(projectPath: Fi) {
     private val manager: SourceMapManager = SourceMapManager(projectPath)
-    private val problems: ProblemCollector = ProblemCollector()
+    private val problems: DiagCollector = DiagCollector()
     private val config: CompilerConfig = CompilerConfig()
 
     fun compile(): Boolean {

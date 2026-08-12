@@ -8,9 +8,9 @@ import mlogix.compiler.core.SourceMapManager.SourceMap
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
-import mlogix.compiler.diagnostic.Problem
-import mlogix.compiler.diagnostic.Problem.LexerProblem
-import mlogix.compiler.diagnostic.ProblemCollector
+import mlogix.compiler.diagnostic.Diagnostic
+import mlogix.compiler.diagnostic.Diagnostic.LexerDiag
+import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.util.I18N.bundle
 import java.util.Locale.getDefault
 import kotlin.math.min
@@ -18,7 +18,7 @@ import kotlin.math.min
 /**
  * 一个项目 构造一次
  */
-class Lexer(private val problems: ProblemCollector) {
+class Lexer(private val problems: DiagCollector) {
 
     private lateinit var sourceMap: SourceMap
 
@@ -810,14 +810,14 @@ class Lexer(private val problems: ProblemCollector) {
         }
     }
 
-    private fun error(text: String): LexerProblem {
-        val e = LexerProblem(sourceMap, text, Problem.ProblemLevel.ERROR)
+    private fun error(text: String): LexerDiag {
+        val e = LexerDiag(sourceMap, text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }
 
-    private fun warning(text: String): LexerProblem {
-        val w = LexerProblem(sourceMap, text, Problem.ProblemLevel.WARNING)
+    private fun warning(text: String): LexerDiag {
+        val w = LexerDiag(sourceMap, text, Diagnostic.DiagLevel.WARNING)
         problems.addWarning(w)
         return w
     }
