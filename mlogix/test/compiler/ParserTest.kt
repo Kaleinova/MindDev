@@ -17,7 +17,7 @@ class ParserTest {
     val lexer = Lexer(problems)
     val parser = Parser(lexer, problems)
 
-    val span = Span(0, 0, 0)
+    val span = Span(0, 0)
 
     @Test
     fun `parse correct AST for addition`() {
@@ -200,7 +200,7 @@ class ParserTest {
     }
 
     private fun token(type: TokenType, literal: Any? = null): Token {
-        return Token(Span(0, 0, 0), type, literal)
+        return Token(Span(0, 0), type, literal)
     }
 
     private fun assertEquals(actual: Stmt, vararg stmts: Stmt) {

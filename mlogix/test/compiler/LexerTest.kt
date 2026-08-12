@@ -77,6 +77,6 @@ class LexerTest {
     }
 
     private fun token(type: TokenType, literal: Any? = null): Token {
-        return Token(Span(0, 0, 0), type, literal)
+        return Token(Span(0, 0), type, literal)
     }
 }

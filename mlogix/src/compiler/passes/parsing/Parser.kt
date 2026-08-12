@@ -67,7 +67,7 @@ class Parser(
             }
         }
 
-        return Program(Span(sourceMap.index, 0, sourceMap.length()), stmts)
+        return Program(Span(0, sourceMap.length()), stmts)
     }
 
     private fun statement(): Stmt? = when {
@@ -1210,7 +1210,7 @@ class Parser(
      * @param to 末尾
      */
     private fun between(from: Spanned, to: Spanned): Span {
-        return Span(sourceMap.index, from.span().start, to.span().end)
+        return Span(from.span().start, to.span().end)
     }
 
     /** 将复合赋值运算符token拆分 */
@@ -1255,7 +1255,7 @@ class Parser(
     private inner class InputWindow {
         private val capacity: Int = 5
         private val buffer = Queue<Token>(capacity)
-        var prevToken: Token = Token(Span(sourceMap.index, 0, 0), TokenType.UNKNOWN)
+        var prevToken: Token = Token(Span(0, 0), TokenType.UNKNOWN)
 
         /**
          * 返回当下的Token并推进一步
