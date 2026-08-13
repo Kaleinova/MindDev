@@ -1,14 +1,14 @@
 package mlogix.compiler.diagnostic
 
 import arc.struct.Seq
-import mlogix.compiler.core.SourceMapManager.SourceMap
+import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Spanned
 import mlogix.util.Ansi
 import kotlin.math.max
 
 /** 用于表示编译器问题诊断，包含错误和警告 */
 abstract class Diagnostic(
-    val sourceMap: SourceMap, // 这个问题所在文件
+    val sourceFile: SourceFile, // 这个问题所在文件
     val message: String,      // 这个问题的名称
     val level: DiagLevel      // 问题级别
 ) {
@@ -21,10 +21,10 @@ abstract class Diagnostic(
     }
 
     fun point(start: Int, end: Int, text: String): Diagnostic {
-        val line = sourceMap.getLine(start)
+        val line = sourceFile.getLine(start)
         val lineInfo = getLineInfo(line)
         if (centerLine == null) centerLine = lineInfo
-        val col = sourceMap.getCol(start)
+        val col = sourceFile.getCol(start)
 
         lineInfo.point(
             col,
@@ -40,9 +40,9 @@ abstract class Diagnostic(
     }
 
     fun info(start: Int, end: Int, text: String): Diagnostic {
-        val lineInfo = getLineInfo(sourceMap.getLine(start))
+        val lineInfo = getLineInfo(sourceFile.getLine(start))
         lineInfo.info(
-            sourceMap.getCol(start),
+            sourceFile.getCol(start),
             "-".repeat(max(1, end - start)),
             text
         )
@@ -54,7 +54,7 @@ abstract class Diagnostic(
         for (lineInfo in lineInfos) {
             if (lineInfo.line == line) return lineInfo
         }
-        val lineInfo = LineInfo(line, sourceMap.getLineString(line))
+        val lineInfo = LineInfo(line, sourceFile.getLineString(line))
         lineInfos.add(lineInfo)
         return lineInfo
     }
@@ -72,7 +72,7 @@ abstract class Diagnostic(
         //  --> Path:line:col
         str.append(" ".repeat(maxLineDigitLen - 1))
             .append(" --> ")
-            .append(sourceMap.relativePath)
+            .append(sourceFile.relativePath)
             .append(":").append(centerLine?.line ?: lineInfos[0].line)
             .append(":").append(centerLine?.col ?: lineInfos[0].col)
             .append("\n")
@@ -88,16 +88,16 @@ abstract class Diagnostic(
     }
 
     /* Lexer产生的问题 */
-    class LexerDiag(sourceMap: SourceMap, problemName: String, level: DiagLevel) :
-        Diagnostic(sourceMap, problemName, level)
+    class LexerDiag(sourceFile: SourceFile, problemName: String, level: DiagLevel) :
+        Diagnostic(sourceFile, problemName, level)
 
     /* Parser产生的问题 */
-    class ParserDiag(sourceMap: SourceMap, problemName: String, level: DiagLevel) :
-        Diagnostic(sourceMap, problemName, level)
+    class ParserDiag(sourceFile: SourceFile, problemName: String, level: DiagLevel) :
+        Diagnostic(sourceFile, problemName, level)
 
     /* SemanticAnalyzer产生的问题 */
-    class SemanticDiag(sourceMap: SourceMap, problemName: String, level: DiagLevel) :
-        Diagnostic(sourceMap, problemName, level)
+    class SemanticDiag(sourceFile: SourceFile, problemName: String, level: DiagLevel) :
+        Diagnostic(sourceFile, problemName, level)
 
     /**
      * @param col 从1开始

@@ -4,7 +4,7 @@ import arc.func.Boolf
 import arc.graphics.Color
 import arc.graphics.Colors
 import arc.struct.Seq
-import mlogix.compiler.core.SourceMapManager.SourceMap
+import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
@@ -20,7 +20,7 @@ import kotlin.math.min
  */
 class Lexer(private val problems: DiagCollector) {
 
-    private lateinit var sourceMap: SourceMap
+    private lateinit var sourceFile: SourceFile
 
     private var length: Int = 0
     private var start: Int = 0
@@ -36,9 +36,9 @@ class Lexer(private val problems: DiagCollector) {
      * 一个文件 重置一次
      * 重置后才能调用其他方法
      */
-    fun reset(sourceMap: SourceMap) {
-        this.sourceMap = sourceMap
-        this.length = sourceMap.length()
+    fun reset(sourceFile: SourceFile) {
+        this.sourceFile = sourceFile
+        this.length = sourceFile.length()
 
         this.isPrevNewline = false
 
@@ -53,8 +53,8 @@ class Lexer(private val problems: DiagCollector) {
     fun tokenize(source: String): Seq<Token> {
         problems.clear()
 
-        val sourceMap = SourceMap(source)
-        reset(sourceMap)
+        val sourceFile = SourceFile(source)
+        reset(sourceFile)
         val tokens = Seq<Token>()
         while (true) {
             val token = scanToken()
@@ -632,7 +632,7 @@ class Lexer(private val problems: DiagCollector) {
             }
             return token(TokenType.DOC_COMMENT, docComment.toString())
         } else if (match('|')) { // 文档注释开始 #|
-            // int col = sourceMap.getCol(current - 1) - 1;
+            // int col = sourceFile.getCol(current - 1) - 1;
             while (!this.isAtEnd) {
                 if (match('\n')) {
                     while (!this.isAtEnd && isWhitespace(peek())) {
@@ -695,7 +695,7 @@ class Lexer(private val problems: DiagCollector) {
     }
 
     private fun charAt(index: Int): Char {
-        return sourceMap.charAt(index)
+        return sourceFile.charAt(index)
     }
 
     private fun match(expected: Char): Boolean {
@@ -742,19 +742,19 @@ class Lexer(private val problems: DiagCollector) {
     }
 
     private fun subString(start: Int, end: Int): String {
-        return sourceMap.subString(start, end)
+        return sourceFile.subString(start, end)
     }
 
     private fun token(type: TokenType, literal: Any? = null): Token {
-        val span = Span.between(sourceMap.index, start, current)
+        val span = Span.between(sourceFile.index, start, current)
 
 //        if (Log.isAllowed(Log.LogType.DEBUG)) {
-//            val lineAndCol: IntArray? = sourceMap.getLineAndCol(start)
+//            val lineAndCol: IntArray? = sourceFile.getLineAndCol(start)
 //            Log.debug(
 //                start.toString() + Ansi.CYAN + "┃"
 //                        + Ansi.DEFAULT + "(" + lineAndCol!![0] + "," + lineAndCol[1] + ")" + Ansi.CYAN + "┃"
 //                        + Ansi.DEFAULT + type.toString() + Ansi.CYAN + "┃"
-//                        + Ansi.DEFAULT + sourceMap.subString(
+//                        + Ansi.DEFAULT + sourceFile.subString(
 //                    start,
 //                    current
 //                ) + (if (literal == null) "" else (Ansi.CYAN + "┃"
@@ -768,10 +768,10 @@ class Lexer(private val problems: DiagCollector) {
     // EOF特化
     private fun eofToken(): Token {
         // 特化部分:current -> start
-        val span = Span.between(sourceMap.index, start, current)
+        val span = Span.between(sourceFile.index, start, current)
 
 //        if (Log.isAllowed(Log.LogType.DEBUG)) {
-//            val lineAndCol = sourceMap.getLineAndCol(start)
+//            val lineAndCol = sourceFile.getLineAndCol(start)
 //            Log.debug(
 //                (start.toString() + Ansi.CYAN + "┃"
 //                        + Ansi.DEFAULT + "(" + lineAndCol[0] + "," + lineAndCol[1] + ")" + Ansi.CYAN + "┃"
@@ -811,13 +811,13 @@ class Lexer(private val problems: DiagCollector) {
     }
 
     private fun error(text: String): LexerDiag {
-        val e = LexerDiag(sourceMap, text, Diagnostic.DiagLevel.ERROR)
+        val e = LexerDiag(sourceFile, text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }
 
     private fun warning(text: String): LexerDiag {
-        val w = LexerDiag(sourceMap, text, Diagnostic.DiagLevel.WARNING)
+        val w = LexerDiag(sourceFile, text, Diagnostic.DiagLevel.WARNING)
         problems.addWarning(w)
         return w
     }

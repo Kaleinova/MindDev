@@ -1,6 +1,6 @@
 package diagnostic;
 
-import mlogix.compiler.core.SourceMapManager.SourceMap;
+import mlogix.compiler.core.SourceMap.SourceFile;
 import mlogix.compiler.core.span.Span;
 import mlogix.compiler.core.token.Token;
 import mlogix.compiler.core.token.TokenType;
@@ -32,10 +32,10 @@ class DiagTest{
 
     static void testLexerDiagCreation() {
         Log.info("Running testLexerDiagCreation...");
-        SourceMap sourceMap = new SourceMap("test line 1\ntest line 2\ntest line 3");
+        SourceFile sourceFile = new SourceFile("test line 1\ntest line 2\ntest line 3");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Test Lexer Error",
             Diagnostic.DiagLevel.ERROR
         );
@@ -57,10 +57,10 @@ class DiagTest{
 
     static void testParserDiagCreation() {
         Log.info("Running testParserDiagCreation...");
-        SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
+        SourceFile sourceFile = new SourceFile("test line 1\ntest line 2");
 
         Diagnostic.ParserDiag diag = new Diagnostic.ParserDiag(
-            sourceMap,
+                sourceFile,
             "Test Parser Warning",
             Diagnostic.DiagLevel.WARNING
         );
@@ -82,10 +82,10 @@ class DiagTest{
 
     static void testSemanticDiagCreation() {
         Log.info("Running testSemanticDiagCreation...");
-        SourceMap sourceMap = new SourceMap("test line 1");
+        SourceFile sourceFile = new SourceFile("test line 1");
 
         Diagnostic.SemanticDiag diag = new Diagnostic.SemanticDiag(
-            sourceMap,
+                sourceFile,
             "Test Semantic Error",
             Diagnostic.DiagLevel.ERROR
         );
@@ -107,10 +107,10 @@ class DiagTest{
 
     static void testPointMethodWithPositions() {
         Log.info("Running testPointMethodWithPositions...");
-        SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
+        SourceFile sourceFile = new SourceFile("test line 1\ntest line 2");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Test Point",
             Diagnostic.DiagLevel.ERROR
         );
@@ -136,13 +136,13 @@ class DiagTest{
 
     static void testPointMethodWithToken() {
         Log.info("Running testPointMethodWithToken...");
-        SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
+        SourceFile sourceFile = new SourceFile("test line 1\ntest line 2");
 
         Span span = new Span(0, 0, 4);
         Token token = new Token(span, TokenType.IDENTIFIER, "test");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Test Token Point",
             Diagnostic.DiagLevel.ERROR
         );
@@ -159,10 +159,10 @@ class DiagTest{
 
     static void testInfoMethodWithPositions() {
         Log.info("Running testInfoMethodWithPositions...");
-        SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
+        SourceFile sourceFile = new SourceFile("test line 1\ntest line 2");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Test Info",
             Diagnostic.DiagLevel.WARNING
         );
@@ -183,13 +183,13 @@ class DiagTest{
 
     static void testInfoMethodWithToken() {
         Log.info("Running testInfoMethodWithToken...");
-        SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
+        SourceFile sourceFile = new SourceFile("test line 1\ntest line 2");
 
         Span span = new Span(0, 0, 4);
         Token token = new Token(span, TokenType.IDENTIFIER, "test");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Test Token Info",
             Diagnostic.DiagLevel.WARNING
         );
@@ -206,10 +206,10 @@ class DiagTest{
 
     static void testMultiplePointsOnSameLine() {
         Log.info("Running testMultiplePointsOnSameLine...");
-        SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
+        SourceFile sourceFile = new SourceFile("test line 1\ntest line 2");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Multiple Points",
             Diagnostic.DiagLevel.ERROR
         );
@@ -231,10 +231,10 @@ class DiagTest{
 
     static void testMultipleLines() {
         Log.info("Running testMultipleLines...");
-        SourceMap sourceMap = new SourceMap("line 1\nline 2\nline 3");
+        SourceFile sourceFile = new SourceFile("line 1\nline 2\nline 3");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Multiple Lines",
             Diagnostic.DiagLevel.ERROR
         );
@@ -278,10 +278,10 @@ class DiagTest{
 
     static void testChainedPointAndInfo() {
         Log.info("Running testChainedPointAndInfo...");
-        SourceMap sourceMap = new SourceMap("test line 1\ntest line 2");
+        SourceFile sourceFile = new SourceFile("test line 1\ntest line 2");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Chained Methods",
             Diagnostic.DiagLevel.ERROR
         );
@@ -303,10 +303,10 @@ class DiagTest{
 
     static void testToStringWithEmptyLineList() {
         Log.info("Running testToStringWithEmptyLineList...");
-        SourceMap sourceMap = new SourceMap("test line");
+        SourceFile sourceFile = new SourceFile("test line");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Empty Line List",
             Diagnostic.DiagLevel.ERROR
         );
@@ -325,10 +325,10 @@ class DiagTest{
 
     static void testDiagExtendsRuntimeException() {
         Log.info("Running testDiagExtendsRuntimeException...");
-        SourceMap sourceMap = new SourceMap("test");
+        SourceFile sourceFile = new SourceFile("test");
 
         Diagnostic.LexerDiag diag = new Diagnostic.LexerDiag(
-            sourceMap,
+                sourceFile,
             "Test Exception",
             Diagnostic.DiagLevel.ERROR
         );

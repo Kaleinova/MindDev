@@ -10,7 +10,7 @@ import mlogix.compiler.ast.Expr.ErrorExpr
 import mlogix.compiler.ast.Expr.Get
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.ast.Stmt.*
-import mlogix.compiler.core.SourceMapManager.SourceMap
+import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
 import mlogix.compiler.core.token.Token
@@ -27,7 +27,7 @@ class Parser(
     private val lexer: Lexer,
     private val problems: DiagCollector,
 ) {
-    private lateinit var sourceMap: SourceMap
+    private lateinit var sourceFile: SourceFile
     private lateinit var input: InputWindow
     private val prevToken: Token get() = input.prevToken
 
@@ -35,9 +35,9 @@ class Parser(
      * 一个文件 一次调用
      * 联动重置lexer，之后由 InputWindow 按需实时调用 lexer.scanToken() 扫描 Token
      */
-    fun parse(sourceMap: SourceMap): Stmt {
-        this.sourceMap = sourceMap
-        lexer.reset(sourceMap)
+    fun parse(sourceFile: SourceFile): Stmt {
+        this.sourceFile = sourceFile
+        lexer.reset(sourceFile)
         input = InputWindow()
         return program()
     }
@@ -49,8 +49,8 @@ class Parser(
     fun parse(source: String): Stmt {
         problems.clear()
 
-        sourceMap = SourceMap(source)
-        lexer.reset(sourceMap)
+        sourceFile = SourceFile(source)
+        lexer.reset(sourceFile)
         input = InputWindow()
         return program()
     }
@@ -67,7 +67,7 @@ class Parser(
             }
         }
 
-        return Program(Span(sourceMap.index, 0, sourceMap.length()), stmts)
+        return Program(Span(sourceFile.index, 0, sourceFile.length()), stmts)
     }
 
     private fun statement(): Stmt? = when {
@@ -1210,7 +1210,7 @@ class Parser(
      * @param to 末尾
      */
     private fun between(from: Spanned, to: Spanned): Span {
-        return Span.between(sourceMap.index, from.span().start(), to.span().end())
+        return Span.between(sourceFile.index, from.span().start(), to.span().end())
     }
 
     /** 将复合赋值运算符token拆分 */
@@ -1236,13 +1236,13 @@ class Parser(
     }
 
     private fun error(text: String): ParserDiag {
-        val e = ParserDiag(sourceMap, text, Diagnostic.DiagLevel.ERROR)
+        val e = ParserDiag(sourceFile, text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }
 
     private fun warning(text: String): ParserDiag {
-        val w = ParserDiag(sourceMap, text, Diagnostic.DiagLevel.WARNING)
+        val w = ParserDiag(sourceFile, text, Diagnostic.DiagLevel.WARNING)
         problems.addWarning(w)
         return w
     }
@@ -1255,7 +1255,7 @@ class Parser(
     private inner class InputWindow {
         private val capacity: Int = 5
         private val buffer = Queue<Token>(capacity)
-        var prevToken: Token = Token(Span(sourceMap.index, 0, 0), TokenType.UNKNOWN)
+        var prevToken: Token = Token(Span(sourceFile.index, 0, 0), TokenType.UNKNOWN)
 
         /**
          * 返回当下的Token并推进一步

@@ -2,7 +2,7 @@ package mlogix.compiler.passes.parsing
 
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.CompilerContext
-import mlogix.compiler.core.SourceMapManager.SourceMap
+import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.pass.CompilerPass
 import mlogix.compiler.core.pass.PassId
 
@@ -15,17 +15,17 @@ import mlogix.compiler.core.pass.PassId
  * （配合前瞻缓冲），**不会预先生成全部 Token 列表**再交给 Parser——那会产生不必要的中间
  * Token 数组，降低性能。保持这种"拉取式"词法扫描正是本 Pass 存在的意义。
  *
- * 输入 [SourceMap] → 输出原始 AST（[Stmt]），为后续 RESOLUTION / TYPE_INFERENCE 等 Pass 提供输入。
+ * 输入 [SourceFile] → 输出原始 AST（[Stmt]），为后续 RESOLUTION / TYPE_INFERENCE 等 Pass 提供输入。
  */
 class ParsingPass(
     private val parser: Parser,
-) : CompilerPass<SourceMap, Stmt> {
+) : CompilerPass<SourceFile, Stmt> {
 
     override val id: PassId = PassId.PARSE
 
     override val dependencies: Set<PassId> = emptySet()
 
-    override fun execute(input: SourceMap, context: CompilerContext): Stmt {
+    override fun execute(input: SourceFile, context: CompilerContext): Stmt {
         return parser.parse(input)
     }
 }

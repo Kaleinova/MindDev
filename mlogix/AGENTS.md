@@ -20,13 +20,13 @@ Big picture architecture
 - This repo is a small language front-end (lexer → parser → AST → semantic analysis → problem reporting).
 - Runtime/entrypoint: `../../MLogiX/src/mlogix/Main.java` — interprets CLI args and calls `Compiler`.
 - Compiler orchestration: `../../MLogiX/src/mlogix/compiler/Compiler.kt` — creates `Lexer`, `Parser`, `DiagManager`,
-  `SourceMapManager`, builds a `CompilationPipeline` and runs per-file phases. Treat it as the canonical pipeline when
+  `SourceMap`, builds a `CompilationPipeline` and runs per-file phases. Treat it as the canonical pipeline when
   adding features.
 - Pass pipeline: `../../MLogiX/src/mlogix/compiler/pipeline/CompilationPipeline.kt` runs an ordered list of `CompilerPass` (contract
   in `../../MLogiX/src/mlogix/compiler/core/pass/CompilerPass.kt`, ids in `PassId.kt`). Passes communicate via IR data and a shared
   `CompilerContext` (`../../MLogiX/src/mlogix/compiler/core/CompilerContext.kt`, concrete `pipeline/CompilationContext.kt`). Add new
-  passes to the `Seq` in `Compiler.compile()`. The pipeline entry is per-file: `pipeline.run(sourceMap, context)` (input
-  `SourceMap`, output `Stmt`).
+  passes to the `Seq` in `Compiler.compile()`. The pipeline entry is per-file: `pipeline.run(sourceFile, context)` (input
+  `SourceFile`, output `Stmt`).
 - Pass ids: `PARSE`, `RESOLUTION`, `DESUGAR`, `TYPE_INFERENCE`, `DATAFLOW`, `EXHAUSTIVENESS`
   (`../../MLogiX/src/mlogix/compiler/core/pass/PassId.kt`).
 - Lexing + parsing (one pass): `../../MLogiX/src/mlogix/compiler/passes/parsing` — `Lexer.kt` tokenizes input into `Token` objects
@@ -65,7 +65,7 @@ Project-specific conventions and important patterns
           `ClassCastException`。请用 `forEach` 遍历累加（参见 `Compiler.PhaseTimer.printPhaseTimes()` 的修复注释）。
         - `arc.struct.EnumSet`是基于int的，所以其最多支持32个枚举值，涉及枚举值集合时一律使用`java.util.EnumSet`
         - `arc.struct.Seq` 在构造时不填参数会默认分配大小为16，构造空`Seq`务必注意使用`Seq(0)`来构造
-    - 文件 IO 用 `arc.files.Fi` 抽象（见 `Main.java` / `SourceMapManager.kt`）。
+    - 文件 IO 用 `arc.files.Fi` 抽象（见 `Main.java` / `SourceMap.kt`）。
     - 函数式接口用 `arc.func.Cons` / `Prov` / `Boolf`；`java.util.function.Consumer` 仅用于与标准库对接的解耦场景（如
       `ProblemCollector.printError()`）。
     - 日志用 `arc.util.Log`（见 `mlogix/util/Log.kt`、`mlogix/util/Ansi.kt`）。
@@ -77,7 +77,7 @@ Project-specific conventions and important patterns
       - 批量修改数据并返回新`Seq`使用`map()`方法。
 - Language positions: use `Span` (in `../../MLogiX/src/mlogix/compiler/core/span/Span.kt`) across AST nodes and problems. When
   changing AST nodes, ensure spans are correct (use `Span.between` or propagate `token.span`).
-- Problem reporting: create `Diagnostic` instances with a `SourceMap` and then call `ProblemCollector.printError()`; the
+- Problem reporting: create `Diagnostic` instances with a `SourceFile` and then call `ProblemCollector.printError()`; the
   collector is the single place tests and the Compiler inspect for failure counts.
 - Passes must never reference each other directly; they exchange data through IR and share state via `CompilerContext`
   (open-closed principle, see the layered dependency direction in `../../MLogiX/plan.md`).
@@ -130,7 +130,7 @@ Searchable anchors for an agent
 
 If you need more context
 
-- Prefer reading `Compiler.kt` first to see how phases are wired. Then read `SourceMapManager.kt`, `DiagManager.kt`
+- Prefer reading `Compiler.kt` first to see how phases are wired. Then read `SourceMap.kt`, `DiagManager.kt`
   and tests to understand expected behavior and error formats.
 
 License & docs: see `../../MLogiX/README.md` and `docs/` for language-user docs.

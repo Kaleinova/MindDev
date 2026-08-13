@@ -4,7 +4,7 @@ import arc.struct.ObjectMap
 import arc.struct.Seq
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Stmt
-import mlogix.compiler.core.SourceMapManager.SourceMap
+import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.symbol.DefId
 import mlogix.compiler.core.symbol.SymbolTable
@@ -27,7 +27,7 @@ import mlogix.compiler.ir.ResolutionResult
  * 一个项目 一次构造；一个文件 一次 [analyze]。
  */
 class TypeInferencer(val problems: DiagCollector) {
-    private lateinit var sourceMap: SourceMap
+    private lateinit var sourceFile: SourceFile
     private lateinit var symbolTable: SymbolTable
     private lateinit var solver: TypeSolver
     private val constraints = Seq<Constraint>()
@@ -43,14 +43,14 @@ class TypeInferencer(val problems: DiagCollector) {
      * 一个文件 一次分析
      *
      * @param result Resolver 的输出（作用域树 + 符号表），其中 AST 标识符已带 defId
-     * @param sourceMap 当前源文件位置映射
+     * @param sourceFile 当前源文件位置映射
      */
-    fun analyze(result: ResolutionResult, sourceMap: SourceMap) {
-        this.sourceMap = sourceMap
+    fun analyze(result: ResolutionResult, sourceFile: SourceFile) {
+        this.sourceFile = sourceFile
         this.symbolTable = result.symbolTable
 
         // prepare solver
-        solver = TypeSolver(problems, sourceMap)
+        solver = TypeSolver(problems, sourceFile)
         constraints.clear()
 
         // walk AST and collect constraints
@@ -554,14 +554,14 @@ class TypeInferencer(val problems: DiagCollector) {
 
     // 错误
     private fun error(name: String): SemanticDiag {
-        val e = SemanticDiag(sourceMap, name, Diagnostic.DiagLevel.ERROR)
+        val e = SemanticDiag(sourceFile, name, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }
 
     // 警告
     private fun warning(name: String): SemanticDiag {
-        val w = SemanticDiag(sourceMap, name, Diagnostic.DiagLevel.WARNING)
+        val w = SemanticDiag(sourceFile, name, Diagnostic.DiagLevel.WARNING)
         problems.addWarning(w)
         return w
     }

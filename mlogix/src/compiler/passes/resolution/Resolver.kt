@@ -3,7 +3,7 @@ package mlogix.compiler.passes.resolution
 import arc.struct.Seq
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Stmt
-import mlogix.compiler.core.SourceMapManager.SourceMap
+import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.symbol.DefId
 import mlogix.compiler.core.symbol.Scope
@@ -30,15 +30,15 @@ import mlogix.compiler.ir.ResolutionResult
  * 因此类型注解里的名字也能被解析。
  */
 class Resolver(private val problems: DiagCollector) {
-    private lateinit var sourceMap: SourceMap
+    private lateinit var sourceFile: SourceFile
     private lateinit var symbolTable: SymbolTable
     private lateinit var rootScope: Scope
 
     /**
      * 一个文件 一次调用
      */
-    fun resolve(ast: Stmt, sourceMap: SourceMap): ResolutionResult {
-        this.sourceMap = sourceMap
+    fun resolve(ast: Stmt, sourceFile: SourceFile): ResolutionResult {
+        this.sourceFile = sourceFile
         this.symbolTable = SymbolTable()
         this.rootScope = Scope(null)
 
@@ -56,7 +56,7 @@ class Resolver(private val problems: DiagCollector) {
             BuiltinType.Null, BuiltinType.Array, BuiltinType.Fn, BuiltinType.Ref,
         )
         for (type in builtins) {
-            val symbol = symbolTable.declare(type.name, type, Span(sourceMap.index, 0, 0))
+            val symbol = symbolTable.declare(type.name, type, Span(sourceFile.index, 0, 0))
             scope.bind(type.name, symbol.id)
         }
     }
@@ -297,7 +297,7 @@ class Resolver(private val problems: DiagCollector) {
     }
 
     private fun error(text: String): SemanticDiag {
-        val e = SemanticDiag(sourceMap, text, Diagnostic.DiagLevel.ERROR)
+        val e = SemanticDiag(sourceFile, text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }

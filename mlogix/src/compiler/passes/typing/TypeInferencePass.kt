@@ -21,7 +21,7 @@ class TypeInferencePass(
     override val dependencies: Set<PassId> = emptySet()
 
     override fun execute(input: ResolutionResult, context: CompilerContext): ResolutionResult {
-        inferencer.analyze(input, context.sourceMap)
+        inferencer.analyze(input, context.sourceFile)
         return input
     }
 }

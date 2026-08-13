@@ -7,38 +7,35 @@ import arc.struct.ObjectMap
 import arc.struct.Seq
 import java.io.IOException
 
-/**
- * 需要在项目中管理时使用SourceMapManager，否则可以直接使用SourceMap
- */
-class SourceMapManager(/* 项目根目录 */val projectPath: Fi) {
-    private val sourceMaps = ObjectMap<Fi, SourceMap>()
+class SourceMap(/* 项目根目录 */val projectPath: Fi) {
+    private val sourceFileMap = ObjectMap<Fi, SourceFile>()
 
     /* 以此通过索引获取sourceMap */
-    private val sourceMapList = Seq<SourceMap>()
+    private val sourceFileList = Seq<SourceFile>()
 
     /**
-     * 加载文件并创建 SourceMap
+     * 加载文件并创建 SourceFile
      */
     @Throws(IOException::class)
-    fun loadSourceMap(filePath: Fi): SourceMap {
-        val sourceMap = SourceMap(filePath, sourceMapList.size, projectPath)
-        sourceMaps.put(filePath, sourceMap)
-        sourceMapList.add(sourceMap)
-        return sourceMap
+    fun loadSourceMap(filePath: Fi): SourceFile {
+        val sourceFile = SourceFile(filePath, sourceFileList.size, projectPath)
+        sourceFileMap.put(filePath, sourceFile)
+        sourceFileList.add(sourceFile)
+        return sourceFile
     }
 
     /**
-     * 获取文件的 SourceMap
+     * 获取文件的 SourceFile
      */
-    fun getSourceMap(filePath: Fi): SourceMap? {
-        return sourceMaps[filePath]
+    fun getSourceFile(filePath: Fi): SourceFile? {
+        return sourceFileMap[filePath]
     }
 
     /**
      * 通过索引获取sourceMap
      */
-    fun getSourceMap(index: Int): SourceMap? {
-        return sourceMapList.get(index)
+    fun getSourceFile(index: Int): SourceFile? {
+        return sourceFileList.get(index)
     }
 
     @Throws(IOException::class)
@@ -46,7 +43,7 @@ class SourceMapManager(/* 项目根目录 */val projectPath: Fi) {
         projectPath.findAll { f -> f.extension().equals("mlx") }.forEach { f -> cons.get(f) }
     }
 
-    class SourceMap {
+    class SourceFile {
         val filePath: Fi?
         val relativePath: String /* 相对于项目根目录的相对目录 */
         val source: String /* 存储所有字符 */
@@ -157,7 +154,7 @@ class SourceMapManager(/* 项目根目录 */val projectPath: Fi) {
          */
         fun getDisplayCol(charIndex: Int): Int {
             val line = getLine(charIndex)
-            val lineStart = lineOffsetList[line - 1]
+            val lineStart = lineOffsetList[line]
             var displayCol = 0
             var i = lineStart
             while (i < charIndex) {

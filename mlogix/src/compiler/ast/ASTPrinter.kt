@@ -1,7 +1,7 @@
 package mlogix.compiler.ast
 
 import arc.struct.Seq
-import mlogix.compiler.core.SourceMapManager.SourceMap
+import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.ast.Stmt.MatchStmt.MatchBranch
 import mlogix.compiler.ast.Stmt.UseStmt.UseItem
 import mlogix.compiler.core.token.Token
@@ -28,11 +28,11 @@ object ASTPrinter {
     // 是否缩进
     private var indentEnabled = false
 
-    private lateinit var sourceMap: SourceMap
+    private lateinit var sourceFile: SourceFile
 
-    fun print(node: ASTNode, sourceMap: SourceMap) {
+    fun print(node: ASTNode, sourceFile: SourceFile) {
         indentEnabled = false // Program前不需要缩进
-        ASTPrinter.sourceMap = sourceMap
+        ASTPrinter.sourceFile = sourceFile
         print(node, "", true)
     }
 
@@ -60,14 +60,14 @@ object ASTPrinter {
         val start = node.span().start()
         val end = max(node.span().end(), start)
 
-        val startLine = sourceMap.getLine(start)
-        val endLine = sourceMap.getLine(end)
+        val startLine = sourceFile.getLine(start)
+        val endLine = sourceFile.getLine(end)
 
-        val startLineString = sourceMap.getLineString(startLine)
-        val endLineString = sourceMap.getLineString(endLine)
+        val startLineString = sourceFile.getLineString(startLine)
+        val endLineString = sourceFile.getLineString(endLine)
 
-        val startCol = sourceMap.getCol(start)
-        val endCol = sourceMap.getCol(end)
+        val startCol = sourceFile.getCol(start)
+        val endCol = sourceFile.getCol(end)
 
         val text = buildString {
             // 前缀

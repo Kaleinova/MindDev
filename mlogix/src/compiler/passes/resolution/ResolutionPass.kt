@@ -21,7 +21,7 @@ class ResolutionPass(
     override val dependencies: Set<PassId> = emptySet()
 
     override fun execute(input: Stmt, context: CompilerContext): ResolutionResult {
-        return resolver.resolve(input, context.sourceMap)
+        return resolver.resolve(input, context.sourceFile)
     }
 }
 

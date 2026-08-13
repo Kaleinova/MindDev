@@ -3,7 +3,7 @@ package mlogix.compiler.passes.typing
 import arc.struct.IntMap
 import arc.struct.ObjectMap
 import arc.struct.Seq
-import mlogix.compiler.core.SourceMapManager.SourceMap
+import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeVisitor
@@ -21,7 +21,7 @@ import mlogix.compiler.diagnostic.DiagCollector
  * - **[Type.Error] / [Type.Unknown] 静默通过**：错误类型抑制级联错误，
  *   未定类型不与任何具体类型冲突。
  */
-class TypeSolver(private val problems: DiagCollector, private val sourceMap: SourceMap) {
+class TypeSolver(private val problems: DiagCollector, private val sourceFile: SourceFile) {
     private val parent = IntMap<Int>()
     private val rootType = IntMap<Type>()
     private var counter = 0
@@ -198,21 +198,21 @@ class TypeSolver(private val problems: DiagCollector, private val sourceMap: Sou
      */
     private fun reportMismatch(t1: Type, t2: Type, pos: Span?, declPos: Span?) {
         val e = Diagnostic.SemanticDiag(
-            sourceMap,
+            sourceFile,
             "类型不匹配: 期望 ${t2.pretty()}, 实际 ${t1.pretty()}",
             Diagnostic.DiagLevel.ERROR,
         )
         problems.addError(e)
-        e.point(pos ?: Span(sourceMap.index, 0, 0), "实际类型: ${t1.pretty()}")
+        e.point(pos ?: Span(sourceFile.index, 0, 0), "实际类型: ${t1.pretty()}")
         if (declPos != null) {
             e.info(declPos, "期望类型: ${t2.pretty()}")
         }
     }
 
     private fun report(text: String, pos: Span?, declPos: Span?) {
-        val e = Diagnostic.SemanticDiag(sourceMap, text, Diagnostic.DiagLevel.ERROR)
+        val e = Diagnostic.SemanticDiag(sourceFile, text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
-        e.point(pos ?: Span(sourceMap.index, 0, 0), "使用方")
+        e.point(pos ?: Span(sourceFile.index, 0, 0), "使用方")
         if (declPos != null) {
             e.info(declPos, "声明方")
         }

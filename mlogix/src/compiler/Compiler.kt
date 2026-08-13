@@ -6,8 +6,8 @@ import arc.struct.ObjectMap
 import arc.struct.Seq
 import mlogix.compiler.ast.ASTPrinter
 import mlogix.compiler.core.CompilerConfig
-import mlogix.compiler.core.SourceMapManager
-import mlogix.compiler.core.SourceMapManager.SourceMap
+import mlogix.compiler.core.SourceMap
+import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.compiler.ir.ResolutionResult
 import mlogix.compiler.passes.parsing.Lexer
@@ -23,7 +23,7 @@ import mlogix.util.Log
 import java.io.IOException
 
 class Compiler(projectPath: Fi) {
-    private val manager: SourceMapManager = SourceMapManager(projectPath)
+    private val manager: SourceMap = SourceMap(projectPath)
     private val problems: DiagCollector = DiagCollector()
     private val config: CompilerConfig = CompilerConfig()
 
@@ -44,26 +44,26 @@ class Compiler(projectPath: Fi) {
             manager.walk { file ->
                 if (!file.extension().equals("mlx")) return@walk
 
-                val sourceMap: SourceMap
+                val sourceFile: SourceFile
                 try {
-                    sourceMap = manager.loadSourceMap(file)
+                    sourceFile = manager.loadSourceMap(file)
                 } catch (e: IOException) {
                     e.printStackTrace()
                     return@walk
                 }
-                if (sourceMap.source.isEmpty()) return@walk
+                if (sourceFile.source.isEmpty()) return@walk
 
                 // ---------- 编译管道（词法+语法分析 + 名称解析 + 类型推断等 Pass） ----------
                 timer.startPhase("编译管道")
-                val context = CompilationContext(problems, sourceMap, config)
-                val result = pipeline.run(sourceMap, context) as ResolutionResult
+                val context = CompilationContext(problems, sourceFile, config)
+                val result = pipeline.run(sourceFile, context) as ResolutionResult
                 timer.endPhase()
 
                 // ---------- 输出报告 ----------
                 problems.printError()
                 problems.printWarning()
                 if (Log.isAllowed(Log.LogType.DEBUG)) {
-                    ASTPrinter.print(result.ast, sourceMap)
+                    ASTPrinter.print(result.ast, sourceFile)
                 }
             }
 
