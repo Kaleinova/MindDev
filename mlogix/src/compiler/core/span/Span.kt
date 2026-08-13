@@ -2,6 +2,28 @@ package mlogix.compiler.core.span
 
 
 class Span : Spanned {
+    companion object {
+        const val INDEX_BITS = 18
+        const val START_BITS = 25
+        const val LEN_BITS = 21
+
+        fun between(index: Int, start: Int, end: Int): Span {
+            return Span(index, start, end - start)
+        }
+
+        fun between(from: Spanned, to: Spanned): Span {
+            require(from.span().index() == to.span().index()) {
+                "不能使用index不同的Span: Span.between(${from.span().toStructuralString()},${
+                    to.span().toStructuralString()
+                })"
+            }
+            return between(
+                from.span().index(),
+                from.span().start(),
+                to.span().end(),
+            )
+        }
+    }
     private val bits: Long
 
     constructor(index: Int, start: Int, len: Int) {
@@ -72,27 +94,4 @@ class Span : Spanned {
         return bits.hashCode()
     }
 
-    companion object {
-        fun between(index: Int, start: Int, end: Int): Span {
-            return Span(index, start, end - start)
-        }
-
-        fun between(from: Spanned, to: Spanned): Span {
-            require(from.span().index() == to.span().index()) {
-                "不能使用index不同的Span: Span.between(${from.span().toStructuralString()},${
-                    to.span().toStructuralString()
-                })"
-            }
-            return between(
-                from.span().index(),
-                from.span().start(),
-                to.span().end(),
-            )
-        }
-
-
-        const val INDEX_BITS = 18
-        const val START_BITS = 25
-        const val LEN_BITS = 21
-    }
 }
