@@ -1,24 +1,48 @@
 package mlogix.compiler.core.span
 
-class Span(
-    val index: Int,  // 该Span所在SourceMap的索引
-    val start: Int,  // 起始字符偏移量
-    val end: Int     // 末尾字符偏移量+1
-) : Spanned {
+
+class Span : Spanned {
+    private val bits: Long
+
+    constructor(index: Int, start: Int, len: Int) {
+        bits = (index.toLong() shl (START_BITS + LEN_BITS)) or
+                (start.toLong() shl LEN_BITS) or
+                len.toLong()
+    }
 
     override fun span(): Span = this
 
+    /** 所在文件的索引 */
+    fun index(): Int {
+        return (bits ushr (START_BITS + LEN_BITS)).toInt()
+    }
+
+    /** 在文件中左端的字符位置 */
+    fun start(): Int {
+        return ((bits ushr LEN_BITS) and 0x1FF_FFFF).toInt()
+    }
+
+    /** 长度 */
+    fun len(): Int {
+        return (bits and 0x1F_FFFF).toInt()
+    }
+
+    /** 在文件中右端的字符位置 */
+    fun end(): Int {
+        return start() + len()
+    }
+
     /**
-     * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[index],[start]和[end]属性
+     * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[bits],[index],[start]和[len]属性
      *
      * 要使用不忽略属性的方法，请使用[toStructuralString]
      */
     override fun toString(): String = "Span"
 
-    fun toStructuralString(): String = "Span{$index,$start,$end}"
+    fun toStructuralString(): String = "Span{${index()},${start()},${len()}}"
 
     /**
-     * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[index],[start]和[end]属性
+     * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[bits],[index],[start]和[len]属性
      *
      * 要使用不忽略属性的相等判断，请使用[structuralEquals]
      */
@@ -32,14 +56,11 @@ class Span(
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
         other as Span
-        if (index != other.index) return false
-        if (start != other.start) return false
-        if (end != other.end) return false
-        return true
+        return bits == other.bits
     }
 
     /**
-     * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[index],[start]和[end]属性
+     * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[bits],[index],[start]和[len]属性
      *
      * 要使用不忽略属性的方法，请使用[structuralHashCode]
      */
@@ -48,18 +69,30 @@ class Span(
     }
 
     fun structuralHashCode(): Int {
-        var result = index
-        result = 31 * result + start
-        result = 31 * result + end
-        return result
+        return bits.hashCode()
     }
 
     companion object {
-        fun between(from: Spanned, to: Spanned): Span {
-            require(from.span().index == to.span().index) {
-                "不能对index不同的Span使用between(_)"
-            }
-            return Span(from.span().index, from.span().start, to.span().end)
+        fun between(index: Int, start: Int, end: Int): Span {
+            return Span(index, start, end - start)
         }
+
+        fun between(from: Spanned, to: Spanned): Span {
+            require(from.span().index() == to.span().index()) {
+                "不能使用index不同的Span: Span.between(${from.span().toStructuralString()},${
+                    to.span().toStructuralString()
+                })"
+            }
+            return between(
+                from.span().index(),
+                from.span().start(),
+                to.span().end(),
+            )
+        }
+
+
+        const val INDEX_BITS = 18
+        const val START_BITS = 25
+        const val LEN_BITS = 21
     }
 }

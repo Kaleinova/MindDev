@@ -15,9 +15,9 @@ import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
+import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.ParserDiag
-import mlogix.compiler.diagnostic.DiagCollector
 import java.util.*
 
 /**
@@ -519,7 +519,7 @@ class Parser(
         }
         errorRight?.let {
             error("不明确关系的逻辑运算表达式，请添加括号")
-                .point(expr.span.start, errorRight.span.end, "")
+                .point(expr.span.start(), errorRight.span.end(), "")
         }
 
         return expr
@@ -534,7 +534,7 @@ class Parser(
             val right = equality()
             if (right is Expr.Binary && right.operator.type == TokenType.OR_OR) {
                 error("不明确关系的逻辑运算表达式，请添加括号")
-                    .point(expr.span.start, right.span.end, "")
+                    .point(expr.span.start(), right.span.end(), "")
                 // expr && right.left || right.right
                 // 按照优先级and > or进行重构
                 // (expr && right.left) || right.right
@@ -1210,7 +1210,7 @@ class Parser(
      * @param to 末尾
      */
     private fun between(from: Spanned, to: Spanned): Span {
-        return Span(sourceMap.index, from.span().start, to.span().end)
+        return Span.between(sourceMap.index, from.span().start(), to.span().end())
     }
 
     /** 将复合赋值运算符token拆分 */

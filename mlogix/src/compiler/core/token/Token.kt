@@ -10,10 +10,10 @@ data class Token(
 ) : Spanned {
 
     override fun toString(): String =
-        "Token{${type.name},${span},$literal}"
+        "Token{${type.name},$literal}"
 
-    fun toSimpleString(): String =
-        "Token(${type.name},$literal)"
+    fun toStringWithSpan(): String =
+        "Token{${type.name},$literal,${span.toStructuralString()}}"
 
     override fun span(): Span {
         return span

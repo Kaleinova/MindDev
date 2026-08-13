@@ -8,9 +8,9 @@ import mlogix.compiler.core.SourceMapManager.SourceMap
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
+import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.LexerDiag
-import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.util.I18N.bundle
 import java.util.Locale.getDefault
 import kotlin.math.min
@@ -746,7 +746,7 @@ class Lexer(private val problems: DiagCollector) {
     }
 
     private fun token(type: TokenType, literal: Any? = null): Token {
-        val span = Span(sourceMap.index, start, current)
+        val span = Span.between(sourceMap.index, start, current)
 
 //        if (Log.isAllowed(Log.LogType.DEBUG)) {
 //            val lineAndCol: IntArray? = sourceMap.getLineAndCol(start)
@@ -768,7 +768,7 @@ class Lexer(private val problems: DiagCollector) {
     // EOF特化
     private fun eofToken(): Token {
         // 特化部分:current -> start
-        val span = Span(sourceMap.index, start, start)
+        val span = Span.between(sourceMap.index, start, current)
 
 //        if (Log.isAllowed(Log.LogType.DEBUG)) {
 //            val lineAndCol = sourceMap.getLineAndCol(start)

@@ -1,21 +1,22 @@
 package mlogix.compiler.ast
 
 import arc.struct.Seq
+import mlogix.compiler.core.span.Span
+import mlogix.compiler.core.span.Spanned
 import mlogix.compiler.core.symbol.DefId
 import mlogix.compiler.core.token.Token
-import mlogix.compiler.core.span.Span
 
 //Expression
-abstract class Expr(span: Span) : ASTNode(span) {
+abstract class Expr(span: Spanned) : ASTNode(span.span()) {
     /**
      * 字面量
      */
-    data class Literal(val token: Token) : Expr(token.span)
+    data class Literal(val token: Token) : Expr(token)
 
     /**
      * 标识符
      */
-    data class Identifier(val token: Token) : Expr(token.span) {
+    data class Identifier(val token: Token) : Expr(token) {
         /**
          * 由 Resolver 填充：此标识符解析到的定义句柄。
          * 未声明（解析失败）时为 null。注意：不参与 data class 的 equals/hashCode。
@@ -39,15 +40,13 @@ abstract class Expr(span: Span) : ASTNode(span) {
     /**
      * 一元运算
      */
-    data class Unary(val operator: Token, val expr: Expr) : Expr(Span.between(operator.span, expr.span))
+    data class Unary(val operator: Token, val expr: Expr) : Expr(Span.between(operator, expr))
 
     /**
      * 二元运算
      */
     data class Binary(val left: Expr, val operator: Token, val right: Expr) : Expr(
-        Span.between(
-            left.span, right.span
-        )
+        Span.between(left, right)
     )
 
     /**
@@ -74,7 +73,7 @@ abstract class Expr(span: Span) : ASTNode(span) {
     /**
      * 获取字段 type.field  type.func
      */
-    data class Get(val obj: Expr, val field: Expr) : Expr(Span.between(obj.span, field.span))
+    data class Get(val obj: Expr, val field: Expr) : Expr(Span.between(obj, field))
 
     /**
      * 错误恢复占位符

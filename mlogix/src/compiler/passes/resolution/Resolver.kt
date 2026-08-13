@@ -1,21 +1,21 @@
 package mlogix.compiler.passes.resolution
 
-import mlogix.compiler.core.symbol.DefId
+import arc.struct.Seq
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.SourceMapManager.SourceMap
 import mlogix.compiler.core.span.Span
+import mlogix.compiler.core.symbol.DefId
 import mlogix.compiler.core.symbol.Scope
 import mlogix.compiler.core.symbol.Symbol
 import mlogix.compiler.core.symbol.SymbolTable
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeScheme
+import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
-import mlogix.compiler.diagnostic.DiagCollector
 import mlogix.compiler.ir.ResolutionResult
-import arc.struct.Seq
 
 /**
  * 名称解析 Pass：构建作用域树，登记定义（分配 [DefId]），挂载 TypeScheme。

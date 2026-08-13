@@ -17,7 +17,7 @@ abstract class Diagnostic(
 
     fun point(obj: Spanned, text: String): Diagnostic {
         val span = obj.span()
-        return point(span.start, span.end, text)
+        return point(span.start(), span.end(), text)
     }
 
     fun point(start: Int, end: Int, text: String): Diagnostic {
@@ -36,7 +36,7 @@ abstract class Diagnostic(
 
     fun info(obj: Spanned, text: String): Diagnostic {
         val span = obj.span()
-        return info(span.start, span.end, text)
+        return info(span.start(), span.end(), text)
     }
 
     fun info(start: Int, end: Int, text: String): Diagnostic {

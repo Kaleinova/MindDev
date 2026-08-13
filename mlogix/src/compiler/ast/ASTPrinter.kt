@@ -48,7 +48,7 @@ object ASTPrinter {
             is Expr -> printNode(node, indent, isLast, EXPR_COLOR)
             is UseItem -> printNode(node, indent, isLast, EXPR_COLOR)
             is MatchBranch -> printNode(node, indent, isLast, EXPR_COLOR)
-            is Token -> printLine(indent, isLast, TOKEN_COLOR + node.toSimpleString() + Ansi.DEFAULT)
+            is Token -> printLine(indent, isLast, TOKEN_COLOR + node + Ansi.DEFAULT)
             is Seq<*> -> printList(node, indent, isLast)
             is Array<*> -> printArray(node, indent, isLast)
             else -> printLine(indent, isLast, node.toString())
@@ -57,8 +57,8 @@ object ASTPrinter {
 
     private fun printNode(node: Spanned, indent: String?, isLast: Boolean, color: String?) {
         // 打印节点类型名称
-        val start = node.span().start
-        val end = max(node.span().end, start)
+        val start = node.span().start()
+        val end = max(node.span().end(), start)
 
         val startLine = sourceMap.getLine(start)
         val endLine = sourceMap.getLine(end)
