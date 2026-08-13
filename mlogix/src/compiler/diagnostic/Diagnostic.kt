@@ -1,199 +1,223 @@
 package mlogix.compiler.diagnostic
 
+import arc.struct.ObjectMap
 import arc.struct.Seq
+import mlogix.compiler.core.SourceMap
 import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
 import mlogix.util.Ansi
 import kotlin.math.max
+import kotlin.math.min
 
-/** 用于表示编译器问题诊断，包含错误和警告 */
+/**
+ * 编译器诊断（错误 / 警告）。
+ *
+ * 设计对齐 rustc：
+ * - 不持有 [SourceFile]——文件信息由每个 [Label.span] 中的文件索引提供，
+ *   渲染时经 [SourceMap] 解析出对应 [SourceFile]；
+ * - [label] 标签（渲染为 `^`/`-`），
+ *   [suggestion] 建议（以 `help:` 渲染，样式类似 label）。
+ */
 abstract class Diagnostic(
-    val sourceFile: SourceFile, // 这个问题所在文件
-    val message: String,      // 这个问题的名称
-    val level: DiagLevel      // 问题级别
+    val message: String,   // 问题描述
+    val level: DiagLevel,  // 问题级别
 ) {
-    val lineInfos = Seq<LineInfo>(2)
-    var centerLine = null as LineInfo?
+    /** 标签列表：第 1 个为主标签（`^`），其余为次级标签（`-`） */
+    val labels = Seq<Label>(2)
 
-    fun point(obj: Spanned, text: String): Diagnostic {
-        val span = obj.span()
-        return point(span.start(), span.end(), text)
-    }
+    /** 建议列表：渲染方式类似 label */
+    val suggestions = Seq<Suggestion>(1)
 
-    fun point(start: Int, end: Int, text: String): Diagnostic {
-        val line = sourceFile.getLine(start)
-        val lineInfo = getLineInfo(line)
-        if (centerLine == null) centerLine = lineInfo
-        val col = sourceFile.getCol(start)
-
-        lineInfo.point(
-            col,
-            "^".repeat(max(1, end - start)),
-            text
-        )
+    fun label(span: Span, text: String): Diagnostic {
+        labels.add(Label(span, text, if (labels.isEmpty) InfoStyle.PRIMARY else InfoStyle.SECONDARY))
         return this
     }
 
-    fun info(obj: Spanned, text: String): Diagnostic {
-        val span = obj.span()
-        return info(span.start(), span.end(), text)
-    }
+    fun label(spanned: Spanned, text: String): Diagnostic = this.label(spanned.span(), text)
 
-    fun info(start: Int, end: Int, text: String): Diagnostic {
-        val lineInfo = getLineInfo(sourceFile.getLine(start))
-        lineInfo.info(
-            sourceFile.getCol(start),
-            "-".repeat(max(1, end - start)),
-            text
-        )
+    /** 添加一条建议 */
+    fun suggestion(span: Spanned, text: String): Diagnostic {
+        suggestions.add(Suggestion(span.span(), text))
         return this
-    }
-
-    // 获取行，若不存在则新建并返回
-    private fun getLineInfo(line: Int): LineInfo {
-        for (lineInfo in lineInfos) {
-            if (lineInfo.line == line) return lineInfo
-        }
-        val lineInfo = LineInfo(line, sourceFile.getLineString(line))
-        lineInfos.add(lineInfo)
-        return lineInfo
-    }
-
-    override fun toString(): String {
-        val color = if (level == DiagLevel.ERROR) Ansi.RED else Ansi.YELLOW
-        val str = StringBuilder("$color${level.name.lowercase()}: $message${Ansi.DEFAULT}\n")
-        lineInfos.sort(Comparator.comparing { li -> li.line })
-
-        var maxLineDigitLen = 0  // 所有 LineInfo 中最长的行号长度
-        for (lineInfo in lineInfos) {
-            maxLineDigitLen = maxOf(maxLineDigitLen, lineInfo.line.toString().length)
-        }
-
-        //  --> Path:line:col
-        str.append(" ".repeat(maxLineDigitLen - 1))
-            .append(" --> ")
-            .append(sourceFile.relativePath)
-            .append(":").append(centerLine?.line ?: lineInfos[0].line)
-            .append(":").append(centerLine?.col ?: lineInfos[0].col)
-            .append("\n")
-
-        for (lineInfo in lineInfos) {
-            str.append(lineInfo.format(maxLineDigitLen))
-        }
-        return str.toString()
     }
 
     enum class DiagLevel {
         WARNING, ERROR
     }
 
-    /* Lexer产生的问题 */
-    class LexerDiag(sourceFile: SourceFile, problemName: String, level: DiagLevel) :
-        Diagnostic(sourceFile, problemName, level)
+    /** 标签样式 */
+    enum class InfoStyle(val marker: Char) {
+        PRIMARY('^'),
+        SECONDARY('-'),
+    }
 
-    /* Parser产生的问题 */
-    class ParserDiag(sourceFile: SourceFile, problemName: String, level: DiagLevel) :
-        Diagnostic(sourceFile, problemName, level)
+    /** 一个带位置与样式的标签 */
+    data class Label(val span: Span, val text: String, val style: InfoStyle)
 
-    /* SemanticAnalyzer产生的问题 */
-    class SemanticDiag(sourceFile: SourceFile, problemName: String, level: DiagLevel) :
-        Diagnostic(sourceFile, problemName, level)
+    /** 一条建议 */
+    data class Suggestion(val span: Span, val text: String)
 
+    /** Lexer 产生的问题 */
+    class LexerDiag(message: String, level: DiagLevel) : Diagnostic(message, level)
+
+    /** Parser 产生的问题 */
+    class ParserDiag(message: String, level: DiagLevel) : Diagnostic(message, level)
+
+    /** SemanticAnalyzer 产生的问题 */
+    class SemanticDiag(message: String, level: DiagLevel) : Diagnostic(message, level)
+
+    // ---------- 渲染实现 ----------
     /**
-     * @param col 从1开始
+     * 渲染诊断（含代码片段）。
+     *
+     * @param sourceMap 用于把 span 的文件索引解析为源码；为 null（如单测）或无标签时只输出标题行。
      */
-    data class Info(val col: Int, val indicator: String, val text: String)
+    fun render(sourceMap: SourceMap?): String {
+        return buildString {
+            val levelColor = if (level == DiagLevel.ERROR) Ansi.RED else Ansi.YELLOW
+            // error/warning: ......
+            append("$levelColor${level.name.lowercase()}: $message${Ansi.DEFAULT}\n")
+            if (sourceMap == null || labels.isEmpty) return toString()
 
-    // 储存一行的错误信息
-    class LineInfo(
-        val line: Int,
-        val lineString: String
-    ) {
-        val infos = Seq<Info>(2)
-        var col: Int = 0
+            // 按文件分组（主标签所在文件在最前）
+            val groups = groupByFile(labels)
 
-        fun point(startCol: Int, indicator: String, text: String) {
-            this.col = startCol
-            infos.add(Info(startCol, indicator, text))
-        }
-
-        fun info(startCol: Int, indicator: String, text: String) {
-            infos.add(Info(startCol, indicator, text))
-        }
-
-        /**
-         * @param maxLineDigitLen 所有 LineInfo 中最长的行号长度
-         */
-        fun format(maxLineDigitLen: Int): String {
-            val str = StringBuilder()
-
-            //   ┃
-            str.append(Ansi.CYAN).append(" ".repeat(maxLineDigitLen)).append(" ┃ ").append(Ansi.DEFAULT).append("\n")
-
-            // L ┃ lineString
-            val lineDigitLen = line.toString().length
-            str.append(Ansi.CYAN)
-                .append(" ".repeat(maxLineDigitLen - lineDigitLen)).append(line).append(" ┃ ")
-                .append(Ansi.DEFAULT).append(lineString).append("\n")
-
-            if (infos.isEmpty) return str.toString()  // 为空退出防止越界
-
-            // 先保证后加入的靠下，后保证顺序
-            infos.sortComparing { info -> info.col }
-
-            //   ┃  ^ - ^ infos[last]text
-            str.append(Ansi.CYAN).append(" ".repeat(maxLineDigitLen)).append(" ┃ ").append(Ansi.DEFAULT)
-            var curCol = 1  // 标识当前输出列
-            for ((col, indicator) in infos) {
-                val count = col - curCol
-                if (count < 0) continue  // 与上一个重叠
-                str.append(" ".repeat(count))
-                str.append(indicator)
-                curCol = col + indicator.length
-            }
-            // 先保证后加入的靠下，后保证顺序
-            infos.reverse().sortComparing { info -> info.col }
-            str.append(" ").append(infos.last().text)
-            str.append("\n")
-
-            //   ┃  | |
-            //   ┃  | infos[last-1].text
-            //   ┃  |
-            //   ┃  infos[last-2].text
-            for (i in infos.size - 1 downTo 1) {
-                val text = infos[i - 1].text
-                if (text.isEmpty()) continue
-
-                //   ┃  | |
-                str.append(Ansi.CYAN).append(" ".repeat(maxLineDigitLen)).append(" ┃ ").append(Ansi.DEFAULT)
-                curCol = 1
-                for (j in 0 until i) {
-                    val count = infos[j].col - curCol
-                    if (count < 0) continue  // 重叠
-                    str.append(" ".repeat(count))
-                    str.append("|")
-                    curCol = infos[j].col + 1
-                }
-                str.append("\n")
-
-                //  ┃ | infos[last-1].text
-                str.append(Ansi.CYAN).append(" ".repeat(maxLineDigitLen)).append(" ┃ ").append(Ansi.DEFAULT)
-                curCol = 1
-                for (j in 0 until i - 1) {
-                    if (infos[j].col == infos[j + 1].col) {  // 与后一个重叠
-                        continue  // 跳过此次
-                    }
-                    val count = infos[j].col - curCol
-                    str.append(" ".repeat(count))
-                    str.append("|")
-                    curCol = infos[j].col + 1
-                }
-                str.append(" ".repeat(maxOf(0, infos[i - 1].col - curCol)))
-                str.append(text)
-                str.append("\n")
+            // --> 路径:行:列（主标签位置）
+            val primary = labels.first()
+            val primaryFile = sourceMap.getSourceFile(primary.span.index())
+            if (primaryFile != null) {
+                val line = primaryFile.getLine(primary.span.start()) + 1
+                val col = primaryFile.getCol(primary.span.start()) + 1
+                // 以主标签所在文件组的行号宽度填充，保证 `-->` 与下方代码片段对齐
+                append(" ".repeat(maxLineDigits(primaryFile, groups.first())))
+                append("--> ${primaryFile.relativePath}:$line:$col\n")
             }
 
-            return str.toString()
+            for (fileInfos in groups) {
+                val file = sourceMap.getSourceFile(fileInfos.first().span.index()) ?: continue
+                append(renderSnippet(file, fileInfos))
+            }
+
+            for (suggestion in suggestions) {
+                append(renderSuggestion(sourceMap, suggestion))
+            }
         }
+    }
+
+    override fun toString(): String = render(null)
+
+    /** 按文件索引分组，保持首次出现顺序（主标签所在文件在最前） */
+    private fun groupByFile(labels: Seq<Label>): Seq<Seq<Label>> {
+        val groups = Seq<Seq<Label>>(1)
+        val groupIndexByFile = ObjectMap<Int, Int>()
+        for (label in labels) {
+            val fileIndex = label.span.index()
+            val groupIndex = groupIndexByFile.get(fileIndex)
+            if (groupIndex == null) {
+                groupIndexByFile.put(fileIndex, groups.size)
+                val group = Seq<Label>(2)
+                group.add(label)
+                groups.add(group)
+            } else {
+                groups.get(groupIndex).add(label)
+            }
+        }
+        return groups
+    }
+
+    private fun renderSnippet(file: SourceFile, labels: Seq<Label>): String {
+        labels.sort(Comparator { a, b ->
+            val lineDiff = file.getLine(a.span.start()) - file.getLine(b.span.start())
+            if (lineDiff != 0) lineDiff
+            else file.getCol(a.span.start()) - file.getCol(b.span.start())
+        })
+
+        val lineDigits = maxLineDigits(file, labels)
+
+        return buildString {
+            append("${Ansi.CYAN}${" ".repeat(lineDigits)} | ${Ansi.DEFAULT}\n")
+
+            var index = 0
+            while (index < labels.size) {
+                val line = file.getLine(labels.get(index).span.start())
+                val lineInfos = Seq<Label>(2)
+                while (index < labels.size && file.getLine(labels.get(index).span.start()) == line) {
+                    lineInfos.add(labels.get(index))
+                    index++
+                }
+                append(renderLine(file, line, lineInfos, lineDigits))
+            }
+        }
+    }
+
+    /** 计算标签中行号的最大位数（代码片段左侧的宽度） */
+    private fun maxLineDigits(file: SourceFile, labels: Seq<Label>): Int {
+        var digits = 1
+        for (label in labels) {
+            digits = max(digits, (file.getLine(label.span.start()) + 1).toString().length)
+        }
+        return digits
+    }
+
+    private fun renderLine(file: SourceFile, line: Int, lineLabels: Seq<Label>, lineDigits: Int): String {
+        val lineNum = (line + 1).toString()
+
+        return buildString {
+            // 源码行
+            append("${Ansi.CYAN}${" ".repeat(lineDigits - lineNum.length)}$lineNum | ${Ansi.DEFAULT}${file.getLineString(line)}\n")
+
+            // 标记行：主标签用 ^，次级标签用 -
+            append("${Ansi.CYAN}${" ".repeat(lineDigits)} | ${Ansi.DEFAULT}")
+            var prevCol = 0
+            var primaryText: String? = null
+            for (label in lineLabels) {
+                val col = file.getCol(label.span.start())
+                val length = underlineLength(file, label.span)
+                append(" ".repeat(max(0, col - prevCol)))
+                val color = if (label.style == InfoStyle.PRIMARY) Ansi.GREEN else Ansi.BLUE
+                append("$color${label.style.marker.toString().repeat(length)}${Ansi.DEFAULT}")
+                prevCol = max(prevCol, col + length)
+                if (label.style == InfoStyle.PRIMARY && label.text.isNotEmpty()) primaryText = label.text
+            }
+            if (primaryText != null) {
+                append(" ${Ansi.GREEN}$primaryText${Ansi.DEFAULT}")
+            }
+            append('\n')
+
+            // 次级标签续行
+            for (label in lineLabels) {
+                if (label.style != InfoStyle.SECONDARY || label.text.isEmpty()) continue
+                val col = file.getCol(label.span.start())
+                append("${Ansi.CYAN}${" ".repeat(lineDigits)} | ${Ansi.DEFAULT}")
+                    .append(" ".repeat(col))
+                    .append("${Ansi.BLUE}|${Ansi.DEFAULT} ${label.text}\n")
+            }
+        }
+    }
+
+    private fun renderSuggestion(sourceMap: SourceMap, suggestion: Suggestion): String {
+        val file = sourceMap.getSourceFile(suggestion.span.index()) ?: return ""
+        val line = file.getLine(suggestion.span.start())
+        val lineNum = (line + 1).toString()
+        val lineDigits = lineNum.length
+
+        return buildString {
+            append("${Ansi.CYAN}  = ${Ansi.DEFAULT}help: ${suggestion.text}\n")
+            append("${Ansi.CYAN}${" ".repeat(lineDigits)} | ${Ansi.DEFAULT}${file.getLineString(line)}\n")
+            val col = file.getCol(suggestion.span.start())
+            val length = underlineLength(file, suggestion.span)
+            append("${Ansi.CYAN}${" ".repeat(lineDigits)} | ${Ansi.DEFAULT}${" ".repeat(col)}${Ansi.GREEN}${"^".repeat(length)}${Ansi.DEFAULT}\n")
+        }
+    }
+
+    /** 计算标签下划线长度（按字符列，至少 1；多行 span 截断到主标签所在行） */
+    private fun underlineLength(file: SourceFile, span: Span): Int {
+        val start = span.start()
+        val line = file.getLine(start)
+        val lineStart = start - file.getCol(start)
+        val lineEnd = lineStart + file.getLineString(line).length
+        val end = min(span.end(), lineEnd)
+        return max(1, end - start)
     }
 }

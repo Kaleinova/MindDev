@@ -1,7 +1,7 @@
 package mlogix.compiler.core
 
 import mlogix.compiler.core.SourceMap.SourceFile
-import mlogix.compiler.diagnostic.DiagCollector
+import mlogix.compiler.diagnostic.DiagHandler
 
 /**
  * 编译器上下文：贯穿所有 Pass 共享的状态。
@@ -14,7 +14,7 @@ import mlogix.compiler.diagnostic.DiagCollector
 interface CompilerContext {
 
     /** 诊断收集器：所有 Pass 通过它报告错误/警告 */
-    val problems: DiagCollector
+    val problems: DiagHandler
 
     /** 当前源文件的源码位置映射 */
     val sourceFile: SourceFile

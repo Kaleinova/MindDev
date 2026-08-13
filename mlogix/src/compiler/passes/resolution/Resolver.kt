@@ -12,7 +12,7 @@ import mlogix.compiler.core.symbol.SymbolTable
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeScheme
-import mlogix.compiler.diagnostic.DiagCollector
+import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
 import mlogix.compiler.ir.ResolutionResult
@@ -29,7 +29,7 @@ import mlogix.compiler.ir.ResolutionResult
  * 内置类型（Int/Num/Str/Bool/Null/Array/Fn/Ref）预置进全局作用域（prelude），
  * 因此类型注解里的名字也能被解析。
  */
-class Resolver(private val problems: DiagCollector) {
+class Resolver(private val problems: DiagHandler) {
     private lateinit var sourceFile: SourceFile
     private lateinit var symbolTable: SymbolTable
     private lateinit var rootScope: Scope
@@ -219,7 +219,7 @@ class Resolver(private val problems: DiagCollector) {
                 val name = (expr.token.literal as? String) ?: expr.token.type.toString()
                 val defId = scope.lookup(name)
                 if (defId == null) {
-                    error("未声明的标识符: $name").point(expr, "未找到此标识符的定义")
+                    error("未声明的标识符: $name").label(expr, "未找到此标识符的定义")
                 } else {
                     expr.defId = defId
                 }
@@ -288,7 +288,7 @@ class Resolver(private val problems: DiagCollector) {
      */
     private fun declare(name: String, type: Type, span: Span, scope: Scope): Symbol? {
         if (scope.containsLocal(name)) {
-            error("重复定义: $name").point(span, "此名称已在当前作用域声明")
+            error("重复定义: $name").label(span, "此名称已在当前作用域声明")
             return null
         }
         val symbol = symbolTable.declare(name, type, span)
@@ -297,7 +297,7 @@ class Resolver(private val problems: DiagCollector) {
     }
 
     private fun error(text: String): SemanticDiag {
-        val e = SemanticDiag(sourceFile, text, Diagnostic.DiagLevel.ERROR)
+        val e = SemanticDiag(text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }
@@ -312,7 +312,7 @@ class Resolver(private val problems: DiagCollector) {
                 val name = (expr.token.literal as? String) ?: expr.token.type.toString()
                 val defId = scope.lookup(name)
                 if (defId == null) {
-                    error("未声明的类型名: $name").point(expr, "未找到此类型名的定义")
+                    error("未声明的类型名: $name").label(expr, "未找到此类型名的定义")
                 } else {
                     expr.defId = defId
                 }

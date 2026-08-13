@@ -8,7 +8,7 @@ import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeVisitor
 import mlogix.compiler.diagnostic.Diagnostic
-import mlogix.compiler.diagnostic.DiagCollector
+import mlogix.compiler.diagnostic.DiagHandler
 
 /**
  * Union-Find（并查集）求解器：惰性求解 Equal 约束。
@@ -21,7 +21,7 @@ import mlogix.compiler.diagnostic.DiagCollector
  * - **[Type.Error] / [Type.Unknown] 静默通过**：错误类型抑制级联错误，
  *   未定类型不与任何具体类型冲突。
  */
-class TypeSolver(private val problems: DiagCollector, private val sourceFile: SourceFile) {
+class TypeSolver(private val problems: DiagHandler, private val sourceFile: SourceFile) {
     private val parent = IntMap<Int>()
     private val rootType = IntMap<Type>()
     private var counter = 0
@@ -193,28 +193,27 @@ class TypeSolver(private val problems: DiagCollector, private val sourceFile: So
      * 类型不匹配报错：**同一个 Diagnostic** 下打印双方类型。
      *
      * - 消息正文列出双方：`期望 <声明方类型>, 实际 <使用方类型>`；
-     * - [Diagnostic.point] 标记**使用方**（[pos]，实际类型来源处）；
-     * - [Diagnostic.info] 标记**声明方**（[declPos]，期望类型声明处，可能为 null）。
+     * - [Diagnostic.label] 标记**使用方**（[pos]，实际类型来源处）；
+     * - [Diagnostic.label] 标记**声明方**（[declPos]，期望类型声明处，可能为 null）。
      */
     private fun reportMismatch(t1: Type, t2: Type, pos: Span?, declPos: Span?) {
         val e = Diagnostic.SemanticDiag(
-            sourceFile,
             "类型不匹配: 期望 ${t2.pretty()}, 实际 ${t1.pretty()}",
             Diagnostic.DiagLevel.ERROR,
         )
         problems.addError(e)
-        e.point(pos ?: Span(sourceFile.index, 0, 0), "实际类型: ${t1.pretty()}")
+        e.label(pos ?: Span(sourceFile.index, 0, 0), "实际类型: ${t1.pretty()}")
         if (declPos != null) {
-            e.info(declPos, "期望类型: ${t2.pretty()}")
+            e.label(declPos, "期望类型: ${t2.pretty()}")
         }
     }
 
     private fun report(text: String, pos: Span?, declPos: Span?) {
-        val e = Diagnostic.SemanticDiag(sourceFile, text, Diagnostic.DiagLevel.ERROR)
+        val e = Diagnostic.SemanticDiag(text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
-        e.point(pos ?: Span(sourceFile.index, 0, 0), "使用方")
+        e.label(pos ?: Span(sourceFile.index, 0, 0), "使用方")
         if (declPos != null) {
-            e.info(declPos, "声明方")
+            e.label(declPos, "声明方")
         }
     }
 }

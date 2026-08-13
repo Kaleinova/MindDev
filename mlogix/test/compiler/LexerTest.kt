@@ -4,15 +4,15 @@ import arc.struct.Seq
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.core.token.TokenType.*
-import mlogix.compiler.diagnostic.DiagCollector
+import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.passes.parsing.Lexer
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class LexerTest {
-    val diagCollector = DiagCollector()
-    val lexer = Lexer(diagCollector)
+    val diagHandler = DiagHandler()
+    val lexer = Lexer(diagHandler)
 
     @Test
     fun `tokenize simple arithmetic expression`() {

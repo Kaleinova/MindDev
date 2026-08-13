@@ -2,8 +2,17 @@ package mlogix.compiler.diagnostic
 
 import arc.struct.Seq
 import arc.util.Log
+import mlogix.compiler.core.SourceMap
 
-class DiagCollector {
+/**
+ * 诊断收集器：贯穿编译管道，集中管理所有 [Diagnostic]。
+ *
+ * 持有 [SourceMap]，打印诊断时把 span 的文件索引解析为源码文件（对齐 rustc 的 Handler + SourceMap）。
+ */
+class DiagHandler(
+    /** 用于把 span 的文件索引解析为源码；单测等不打印场景可传 null */
+    val sourceMap: SourceMap? = null,
+) {
     val errors = Seq<Diagnostic>()
     val warnings = Seq<Diagnostic>()
 
@@ -12,7 +21,7 @@ class DiagCollector {
     }
 
     fun restoreSnapshot(snapshot: DiagCollectorSnapshot) {
-        // Left closed and right closed
+        // 左闭右闭
         if (snapshot.errorNum != errorNum()) {
             errors.removeRange(snapshot.errorNum, errorNum() - 1)
         }
@@ -42,11 +51,11 @@ class DiagCollector {
     }
 
     fun printError() {
-        errors.forEach { e: Diagnostic -> Log.err(e.toString()) }
+        errors.forEach { e: Diagnostic -> Log.err(e.render(sourceMap)) }
     }
 
     fun printWarning() {
-        warnings.forEach { w: Diagnostic -> Log.warn(w.toString()) }
+        warnings.forEach { w: Diagnostic -> Log.warn(w.render(sourceMap)) }
     }
 
     fun clear() {

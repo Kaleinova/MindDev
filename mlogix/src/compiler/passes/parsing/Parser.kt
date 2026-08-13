@@ -15,7 +15,7 @@ import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
-import mlogix.compiler.diagnostic.DiagCollector
+import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.ParserDiag
 import java.util.*
@@ -25,7 +25,7 @@ import java.util.*
  */
 class Parser(
     private val lexer: Lexer,
-    private val problems: DiagCollector,
+    private val problems: DiagHandler,
 ) {
     private lateinit var sourceFile: SourceFile
     private lateinit var input: InputWindow
@@ -137,7 +137,7 @@ class Parser(
             }
         }
         error("期望标识符、* 或 **")
-            .point(lookAhead(0), "")
+            .label(lookAhead(0), "")
         recoverByTokenTree(TokenType.RECOVERY)
         return null
     }
@@ -149,8 +149,8 @@ class Parser(
         while (!check(TokenType.RBRACE)) {
             if (isAtEnd) {
                 error("期望`块`语句的`}`")
-                    .info(lBrace, "开头")
-                    .point(lookAhead(0), "当前")
+                    .label(lBrace, "开头")
+                    .label(lookAhead(0), "当前")
                 return BlockStmt(between(lBrace, prevToken), stmts)
             }
             statement()?.let { stmts.add(it) }
@@ -190,8 +190,8 @@ class Parser(
 
         if (consume(TokenType.LBRACE) == null) {
             error("期望`match`语句的`{`")
-                .info(start, "语句开头")
-                .point(lookAhead(0), "当前")
+                .label(start, "语句开头")
+                .label(lookAhead(0), "当前")
             return MatchStmt(between(start, scrutinee), scrutinee, null)
         }
 
@@ -199,8 +199,8 @@ class Parser(
         while (!match(TokenType.RBRACE)) {
             if (isAtEnd) {
                 error("期望`match`语句的`}`")
-                    .info(start, "语句开头")
-                    .point(lookAhead(0), "当前")
+                    .label(start, "语句开头")
+                    .label(lookAhead(0), "当前")
                 return MatchStmt(
                     between(start, (if (branches.isEmpty) start else branches[branches.size - 1])),
                     scrutinee,
@@ -249,12 +249,12 @@ class Parser(
             // for repeatNum
             expr = expression()
         }
-        if (expect(TokenType.LBRACE) { e: Diagnostic -> e.info(head, "`for`语句") } == null) {
+        if (expect(TokenType.LBRACE) { e: Diagnostic -> e.label(head, "`for`语句") } == null) {
             return ForStmt(between(start, prevToken), flag, varDecl, expr, null)
         }
-        if (expect(TokenType.LBRACE) { e: Diagnostic -> e.info(head, "`for`语句") } == null) {
+        if (expect(TokenType.LBRACE) { e: Diagnostic -> e.label(head, "`for`语句") } == null) {
             when (recoverByTokenTree(EnumSet.of(TokenType.RBRACE))) {
-                TokenType.RBRACE -> error("不匹配的闭定界符").point(next(), "")
+                TokenType.RBRACE -> error("不匹配的闭定界符").label(next(), "")
                 TokenType.EOF -> Unit
                 else -> kotlin.error("Unreachable")
             }
@@ -272,9 +272,9 @@ class Parser(
 
         val expr = expression()
 
-        if (expect(TokenType.LBRACE) { e: Diagnostic -> e.info(head, "`while`语句") } == null) {
+        if (expect(TokenType.LBRACE) { e: Diagnostic -> e.label(head, "`while`语句") } == null) {
             when (recoverByTokenTree(EnumSet.of(TokenType.RBRACE))) {
-                TokenType.RBRACE -> error("不匹配的闭定界符").point(next(), "")
+                TokenType.RBRACE -> error("不匹配的闭定界符").label(next(), "")
                 TokenType.EOF -> Unit
                 else -> kotlin.error("Unreachable")
             }
@@ -297,8 +297,8 @@ class Parser(
             if (check(TokenType.COLON)) {
                 // 冒号跟flag不在同一行
                 error("循环标签中`:`必须与标签同行")
-                    .info(flag, "标签")
-                    .point(next(), "")
+                    .label(flag, "标签")
+                    .label(next(), "")
                 if (check(TokenType.FOR)) return forStmt(Expr.Identifier(flag))
                 if (check(TokenType.WHILE)) return whileStmt(Expr.Identifier(flag))
             }
@@ -311,7 +311,7 @@ class Parser(
     private fun fnStmt(): Stmt {
         val start = next()
 
-        val name = consume(TokenType.IDENTIFIER) { e -> e.info(start, "函数声明必须有函数名") }
+        val name = consume(TokenType.IDENTIFIER) { e -> e.label(start, "函数声明必须有函数名") }
         val lParen: Token?
         if (name == null) {
             if (!check(TokenType.LPAREN)) {
@@ -319,7 +319,7 @@ class Parser(
             }
             lParen = next()
         } else {
-            lParen = consume(TokenType.LPAREN) { e -> e.info(start, "函数声明必须有形参") }
+            lParen = consume(TokenType.LPAREN) { e -> e.label(start, "函数声明必须有形参") }
             if (lParen == null) {
                 return FnStmt(between(start, name), name, null, null, null)
             }
@@ -329,7 +329,7 @@ class Parser(
         val parameters = seq(
             {
                 consume(TokenType.IDENTIFIER) { e ->
-                    e.info(lookAhead(0), "函数形参应该是标识符")
+                    e.label(lookAhead(0), "函数形参应该是标识符")
                 }?.let {
                     val expr = annotation(Expr.Identifier(it))
                     isSeparatorOptional = expr !is Expr.Annotation
@@ -338,10 +338,10 @@ class Parser(
             },
             EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
             { isSeparatorOptional },
-            { error("期望`,`或换行符作为形参分隔符").info(lParen, "形参开头") },
+            { error("期望`,`或换行符作为形参分隔符").label(lParen, "形参开头") },
             TokenType.RPAREN,
             true,
-            { error("期望`)`作为函数声明形参末尾").info(lParen, "形参开头") }
+            { error("期望`)`作为函数声明形参末尾").label(lParen, "形参开头") }
         )
 
         val results = Seq<Expr>(3)
@@ -351,7 +351,7 @@ class Parser(
                 results.add(Expr.Identifier(Token(next().span, TokenType.IDENTIFIER, "Null")))
                 if (check(TokenType.COMMA)) {
                     warning("多余的`,`")
-                        .point(next(), "")
+                        .label(next(), "")
                 }
             }
 
@@ -360,7 +360,7 @@ class Parser(
                 seq(
                     {
                         consume(TokenType.IDENTIFIER) { e ->
-                            e.info(lookAhead(0), "函数返回值应该是标识符")
+                            e.label(lookAhead(0), "函数返回值应该是标识符")
                         }?.let {
                             val expr = annotation(Expr.Identifier(it))
                             isSeparatorOptional = expr !is Expr.Annotation
@@ -369,14 +369,14 @@ class Parser(
                     },
                     EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
                     { isSeparatorOptional },
-                    { error("期望`,`或换行符作为返回值分隔符").info(arrow, "返回值开头") },
+                    { error("期望`,`或换行符作为返回值分隔符").label(arrow, "返回值开头") },
                     TokenType.LBRACE,
                     false,
-                    { error("期望`{`作为返回值声明末尾").info(lParen, "形参开头") }
+                    { error("期望`{`作为返回值声明末尾").label(lParen, "形参开头") }
                 ))
             if (results.isEmpty) {
                 error("`->`之后必须声明返回值")
-                    .point(arrow, "")
+                    .label(arrow, "")
             }
         }
 
@@ -417,8 +417,8 @@ class Parser(
 
         if (isStmtEnd) {
             error("未声明变量的`set`语句")
-                .info(start, "")
-                .point(lookAhead(0), "")
+                .label(start, "")
+                .label(lookAhead(0), "")
             return null
         }
         var expr = expression()
@@ -462,7 +462,7 @@ class Parser(
         if (isStmtEnd) {
             if (check(TokenType.ASSIGNS)) {
                 error("赋值语句缺少左侧表达式")
-                    .point(next(), "")
+                    .label(next(), "")
                 recoverByTokenTree(TokenType.RECOVERY)
             }
             return null
@@ -471,7 +471,7 @@ class Parser(
             val operator = next()
             if (isStmtEnd) {
                 error("赋值语句缺少右侧表达式")
-                    .point(next(), "")
+                    .label(next(), "")
                 recoverByTokenTree(TokenType.RECOVERY)
                 return null
             }
@@ -484,7 +484,7 @@ class Parser(
             val operator = next()
             if (isStmtEnd) {
                 error("赋值语句缺少右侧表达式")
-                    .point(next(), "")
+                    .label(next(), "")
                 recoverByTokenTree(TokenType.RECOVERY)
                 return null
             }
@@ -519,7 +519,7 @@ class Parser(
         }
         errorRight?.let {
             error("不明确关系的逻辑运算表达式，请添加括号")
-                .point(expr.span.start(), errorRight.span.end(), "")
+                .label(Span.between(expr, errorRight), "")
         }
 
         return expr
@@ -534,7 +534,7 @@ class Parser(
             val right = equality()
             if (right is Expr.Binary && right.operator.type == TokenType.OR_OR) {
                 error("不明确关系的逻辑运算表达式，请添加括号")
-                    .point(expr.span.start(), right.span.end(), "")
+                    .label(Span.between(expr, right), "")
                 // expr && right.left || right.right
                 // 按照优先级and > or进行重构
                 // (expr && right.left) || right.right
@@ -671,7 +671,7 @@ class Parser(
 
                     val index = expression()
                     val rBracket =
-                        consume(TokenType.RBRACKET) { e: Diagnostic -> e.info(lBracket, "解析`数组索引`时出现错误") }
+                        consume(TokenType.RBRACKET) { e: Diagnostic -> e.label(lBracket, "解析`数组索引`时出现错误") }
 
                     expr = if (rBracket != null) {
                         Expr.Index(between(lBracket, rBracket), expr, index)
@@ -693,8 +693,8 @@ class Parser(
                         val innerExpr = expression()
                         if (innerExpr is ErrorExpr) {
                             error("期望`)`作为函数调用参数末尾")
-                                .info(lParen, "参数开头")
-                                .point(lookAhead(0), "末尾")
+                                .label(lParen, "参数开头")
+                                .label(lookAhead(0), "末尾")
                             expr = Expr.Call(between(expr, arguments.lastOrNull() ?: lParen), expr, arguments)
                             break
                         }
@@ -709,7 +709,7 @@ class Parser(
 
                     val id =
                         consume(TokenType.IDENTIFIER) { e: Diagnostic ->
-                            e.info(dot, "解析`类元素访问`时出现错误")
+                            e.label(dot, "解析`类元素访问`时出现错误")
                         } ?: return expr
                     val field: Expr = Expr.Identifier(id)
 
@@ -740,15 +740,15 @@ class Parser(
                 { expression() },
                 EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
                 { true },
-                { error(text = "期望空格或`,`或换行符作为数组分隔符").info(obj = lBrace, text = "数组开头") },
+                { error(text = "期望空格或`,`或换行符作为数组分隔符").label(lBrace, "数组开头") },
                 TokenType.RBRACE,
                 true,
-                { error("期望`}`作为数组末尾").info(lBrace, "数组开头") }
+                { error("期望`}`作为数组末尾").label(lBrace, "数组开头") }
             )
             return Expr.Array(between(lBrace, prevToken), elements)
         }
 
-        error("期望表达式").point(lookAhead(0), "")
+        error("期望表达式").label(lookAhead(0), "")
         return ErrorExpr(next().span)
     }
 
@@ -775,7 +775,7 @@ class Parser(
             enums.add(Expr.Identifier(Token(next().span, TokenType.IDENTIFIER, "Null")))
             if (check(TokenType.OR)) {
                 warning("多余的`|`")
-                    .point(next(), "")
+                    .label(next(), "")
             }
         }
 
@@ -803,10 +803,10 @@ class Parser(
             { expression() },
             EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
             { true },
-            { error("期望`,`或换行符作为元组分隔符").info(lParen, "元组开头") },
+            { error("期望`,`或换行符作为元组分隔符").label(lParen, "元组开头") },
             TokenType.RPAREN,
             true,
-            { error("期望`)`作为元组末尾").info(lParen, "元组开头") }
+            { error("期望`)`作为元组末尾").label(lParen, "元组开头") }
         )
 //         TODO style提示
         if (elements.size == 1) return elements[0]
@@ -818,10 +818,10 @@ class Parser(
      * @param elementProv 解析并返回一个序列元素，无法解析时请返回[ErrorExpr]/`null`以调用恢复，务必消耗元素，否则死循环
      * @param separators 分隔符，方法内已有自带的分隔符[matchStmtEnd]，可填`setOf()`以作空格
      * @param isSeparatorOptional 是否允许省略分隔符
-     * @param missSeparator 当`expect(end)`失败时使用missSeparator报错，方法自动调用[Diagnostic.point]
+     * @param missSeparator 当`expect(end)`失败时使用missSeparator报错，方法自动调用[Diagnostic.label]
      * @param end 序列结束标志
      * @param consumeEnd 是否消耗[end]，`false`时不强求[end]出现
-     * @param missEnd 错误恢复到EOF时调用，[consumeEnd]为`false`时不使用，方法自动调用[Diagnostic.point]
+     * @param missEnd 错误恢复到EOF时调用，[consumeEnd]为`false`时不使用，方法自动调用[Diagnostic.label]
      */
     private fun seq(
         elementProv: Prov<Expr?>,
@@ -852,7 +852,7 @@ class Parser(
                 if (check(end)) break
                 // 没有结束符，可能是漏掉了分隔符，报错并恢复
                 if (!isAtEnd) {
-                    missSeparator.get().point(lookAhead(0), "")
+                    missSeparator.get().label(lookAhead(0), "")
                 }
             }
             // 解析失败，开始恢复
@@ -861,7 +861,7 @@ class Parser(
 
                 TokenType.EOF -> {
                     if (consumeEnd) {
-                        missEnd?.get()?.point(lookAhead(0), "")
+                        missEnd?.get()?.label(lookAhead(0), "")
                     }
                     return seq
                 }
@@ -1048,7 +1048,7 @@ class Parser(
         if (check(type)) return lookAhead(0)
 
         error("期望$type")
-            .point(lookAhead(0), type.toString())
+            .label(lookAhead(0), type.toString())
         return null
     }
 
@@ -1060,7 +1060,7 @@ class Parser(
 
         cons.get(
             error("期望$type")
-                .point(lookAhead(0), type.toString()),
+                .label(lookAhead(0), type.toString()),
         )
         return null
     }
@@ -1089,7 +1089,7 @@ class Parser(
         if (matchStmtEnd()) return true
         // 如果没有找到，报告错误
         error("缺少换行或分号作为语句结束符")
-            .point(lookAhead(0), "")
+            .label(lookAhead(0), "")
         return false
     }
 
@@ -1100,7 +1100,7 @@ class Parser(
         if (check(type)) return next()
 
         error("期望$type")
-            .point(lookAhead(0), type.toString())
+            .label(lookAhead(0), type.toString())
         return null
     }
 
@@ -1112,7 +1112,7 @@ class Parser(
 
         cons.get(
             error("期望$type")
-                .point(lookAhead(0), type.toString()),
+                .label(lookAhead(0), type.toString()),
         )
         return null
     }
@@ -1124,13 +1124,13 @@ class Parser(
     //            sbd.append(type.toString()).append(" ");
     //        }
     //        return new Err<>(error("期望TokenType")
-    //                .point(lookAhead(), sbd.toString())
+    //                .label(lookAhead(), sbd.toString())
     //        );
     //    }
     //
     //    private Res<Token> consume(TokenType type, Runnable r) {
     //        if(check(type)) return new Ok<>(next());
-    //        Diagnostic.ParserDiag e = (Diagnostic.ParserDiag) error("期望字符").point(lookAhead(), type.toString());
+    //        Diagnostic.ParserDiag e = (Diagnostic.ParserDiag) error("期望字符").label(lookAhead(), type.toString());
     //        r.run();
     //        return new Err<>(e);
     //    }
@@ -1236,13 +1236,13 @@ class Parser(
     }
 
     private fun error(text: String): ParserDiag {
-        val e = ParserDiag(sourceFile, text, Diagnostic.DiagLevel.ERROR)
+        val e = ParserDiag(text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }
 
     private fun warning(text: String): ParserDiag {
-        val w = ParserDiag(sourceFile, text, Diagnostic.DiagLevel.WARNING)
+        val w = ParserDiag(text, Diagnostic.DiagLevel.WARNING)
         problems.addWarning(w)
         return w
     }
@@ -1299,6 +1299,6 @@ class Parser(
     private data class Snapshot(
         val inputSnapshot: InputWindow,
         val lexerSnapshot: Lexer.LexerSnapshot,
-        val problemsSnapshot: DiagCollector.DiagCollectorSnapshot
+        val problemsSnapshot: DiagHandler.DiagCollectorSnapshot
     )
 }

@@ -7,6 +7,7 @@ import mlogix.compiler.ast.Stmt.UseStmt.UseItem
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
+import mlogix.compiler.core.symbol.DefId
 import mlogix.util.Ansi
 import kotlin.math.max
 
@@ -73,7 +74,7 @@ object ASTPrinter {
             // 前缀
             append("$color${node::class.simpleName}")
             append("$VALUE_COLOR[$start,$end) ")
-            append("${Ansi.DEFAULT}${"$startLine"}")
+            append("${Ansi.DEFAULT}${startLine + 1}")
             append("${Ansi.BLACK}${Ansi.B_CYAN}")
             append(startLineString.substring(0, startCol))
 
@@ -82,7 +83,7 @@ object ASTPrinter {
                 append("${Ansi.B_CYAN}${startLineString.substring(endCol)}")
             } else {
                 append("${Ansi.B_YELLOW}${startLineString.substring(startCol)}")
-                append("${Ansi.DEFAULT}${" $endLine"}")
+                append("${Ansi.DEFAULT} ${endLine + 1}")
                 append("${Ansi.BLACK}${Ansi.B_YELLOW}${endLineString.substring(0, endCol)}")
                 append("${Ansi.B_CYAN}${endLineString.substring(endCol)}")
             }
@@ -127,7 +128,7 @@ object ASTPrinter {
         }
 
         // 对于简单类型直接打印
-        if (value is Boolean || value is Number || value is String || value is Token) {
+        if (value is Boolean || value is Number || value is String || value is Token || value is DefId) {
             printLine(indent, isLast, "$FIELD_COLOR$fieldName: $VALUE_COLOR$value${Ansi.DEFAULT}")
             return
         }

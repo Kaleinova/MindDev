@@ -14,7 +14,7 @@ import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
-import mlogix.compiler.diagnostic.DiagCollector
+import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.ir.ResolutionResult
 
 /**
@@ -26,16 +26,16 @@ import mlogix.compiler.ir.ResolutionResult
  *
  * 一个项目 一次构造；一个文件 一次 [analyze]。
  */
-class TypeInferencer(val problems: DiagCollector) {
+class TypeInferencer(val problems: DiagHandler) {
     private lateinit var sourceFile: SourceFile
     private lateinit var symbolTable: SymbolTable
     private lateinit var solver: TypeSolver
     private val constraints = Seq<Constraint>()
 
-    /** 当前函数返回上下文栈：期望返回类型 + 函数声明位置（用于 return 不匹配报错的声明方 info） */
+    /** 当前函数返回上下文栈：期望返回类型 + 函数声明位置（用于 return 不匹配报错的声明方 label） */
     private val returnContextStack = Seq<ReturnContext>(2)
 
-    /** 类型变量 → 声明位置：形参类型变量登记其注解 span，供调用处报错的声明方 info 使用 */
+    /** 类型变量 → 声明位置：形参类型变量登记其注解 span，供调用处报错的声明方 label 使用 */
     private val varDeclSpans = ObjectMap<Int, Span>()
 
     // ========== 执行类型推断 ==========
@@ -167,7 +167,7 @@ class TypeInferencer(val problems: DiagCollector) {
                     if (defId == null) {
                         val lhsName = (lhsIdent.token.literal as? String) ?: lhsIdent.token.type.toString()
                         error("未声明的变量: $lhsName")
-                            .point(lhsIdent, "未找到此变量的声明")
+                            .label(lhsIdent, "未找到此变量的声明")
                     } else {
                         val symbol = symbolTable.get(defId)
                         if (symbol != null) {
@@ -177,7 +177,7 @@ class TypeInferencer(val problems: DiagCollector) {
                                 leftType = solver.freshVar()
                                 symbol.values.put("inferred", leftType)
                             }
-                            // 使用方=实际 RHS 类型（point 于 RHS 处），声明方=变量声明类型（info 于符号声明处）
+                            // 使用方=实际 RHS 类型（label 于 RHS 处），声明方=变量声明类型（label 于符号声明处）
                             constraints.add(Constraint.Equal(valueR.type, leftType, stmt.value.span, symbol.span))
                         }
                     }
@@ -232,7 +232,7 @@ class TypeInferencer(val problems: DiagCollector) {
                 if (p is Expr.Annotation) {
                     val declType = annotationToType(p)
                     val useSpan = unwrapIdentifier(p)?.span ?: p.span
-                    // 登记：该类型变量的声明位置 = 形参注解整体 span（调用处报错的声明方 info 用）
+                    // 登记：该类型变量的声明位置 = 形参注解整体 span（调用处报错的声明方 label 用）
                     varDeclSpans.put(tv.index, p.span)
                     // t1=形参实际类型(使用方)，t2=注解声明的类型(声明方)
                     constraints.add(Constraint.Equal(tv, declType, useSpan, p.span))
@@ -286,7 +286,7 @@ class TypeInferencer(val problems: DiagCollector) {
                 val defId = expr.defId
                 if (defId == null) {
                     val name = (expr.token.literal as? String) ?: expr.token.type.toString()
-                    error("未声明的标识符: $name").point(expr, "未找到此标识符的定义")
+                    error("未声明的标识符: $name").label(expr, "未找到此标识符的定义")
                     InferResult(BuiltinType.Unknown, Seq(0))
                 } else {
                     val symbol = symbolTable.get(defId)
@@ -410,13 +410,13 @@ class TypeInferencer(val problems: DiagCollector) {
                 val fnType = Type.Func(paramVars, resVar)
                 combined.add(Constraint.Equal(fnType, callee.type, expr.callee.span, calleeInfo?.first))
 
-                // 2) 逐实参约束：使用方=实参自身 span（point），声明方=形参注解位置（info）。
+                // 2) 逐实参约束：使用方=实参自身 span（label），声明方=形参注解位置（label）。
                 //    这样每个不匹配的实参单独报错，而不是整个 Call 一个错误。
                 val paramDeclSpans = calleeInfo?.second
                 val declSpanCount = paramDeclSpans?.size ?: 0
                 for ((i, element) in argTypes.withIndex()) {
                     // 实参数量可能超过形参声明数量（结构链接约束会另行报「参数数量不匹配」），
-                    // 越界的实参没有对应形参声明位置 → declSpan 取 null（退化为仅使用方 point）。
+                    // 越界的实参没有对应形参声明位置 → declSpan 取 null（退化为仅使用方 label）。
                     // （paramDeclSpans 为 null 时 declSpanCount=0，`i < 0` 恒假，?. 保证不越界）
                     val declSpan = if (i < declSpanCount) paramDeclSpans?.get(i) else null
                     combined.add(
@@ -487,7 +487,7 @@ class TypeInferencer(val problems: DiagCollector) {
         if (variants.isEmpty) return BuiltinType.Unknown
         if (variants.size > 1) {
             error("联合/枚举类型注解暂不支持类型检查")
-                .point(annotation, "请改用单一类型注解，如 `a: Int`")
+                .label(annotation, "请改用单一类型注解，如 `a: Int`")
             return Type.Error
         }
         return variantToType(variants[0])
@@ -532,13 +532,13 @@ class TypeInferencer(val problems: DiagCollector) {
     /**
      * 若 [calleeExpr] 是已知具名函数（Identifier 且符号类型为 [Type.Func]），
      * 返回 `函数名位置` 与 `形参声明位置列表`（与形参类型变量一一对应），
-     * 供调用处报错的声明方 info 定位。
+     * 供调用处报错的声明方 label 定位。
      *
      * 形参位置取自 [varDeclSpans]（形参类型变量 → 注解 span，在 [analyzeFnStmt] 登记）；
      * 无注解的形参没有「期望类型声明处」，对应位置为 null。
      *
      * @return null 表示 callee 不是已知具名函数（如 lambda、方法引用），
-     *         调用处报错将退化为只有使用方 point、没有声明方 info。
+     *         调用处报错将退化为只有使用方 label、没有声明方 label。
      */
     private fun paramDeclSpansOf(calleeExpr: Expr): Pair<Span, Seq<Span?>>? {
         val ident = calleeExpr as? Expr.Identifier ?: return null
@@ -554,19 +554,19 @@ class TypeInferencer(val problems: DiagCollector) {
 
     // 错误
     private fun error(name: String): SemanticDiag {
-        val e = SemanticDiag(sourceFile, name, Diagnostic.DiagLevel.ERROR)
+        val e = SemanticDiag(name, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
         return e
     }
 
     // 警告
     private fun warning(name: String): SemanticDiag {
-        val w = SemanticDiag(sourceFile, name, Diagnostic.DiagLevel.WARNING)
+        val w = SemanticDiag(name, Diagnostic.DiagLevel.WARNING)
         problems.addWarning(w)
         return w
     }
 
-    // 当前函数返回上下文：期望返回类型 + 函数声明位置（不匹配报错的声明方 info 用）
+    // 当前函数返回上下文：期望返回类型 + 函数声明位置（不匹配报错的声明方 label 用）
     private data class ReturnContext(val expected: Type, val declSpan: Span)
 
     // endregion

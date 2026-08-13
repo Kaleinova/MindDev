@@ -6,14 +6,14 @@ import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
-import mlogix.compiler.diagnostic.DiagCollector
+import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.passes.parsing.Lexer
 import mlogix.compiler.passes.parsing.Parser
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class ParserTest {
-    val problems = DiagCollector()
+    val problems = DiagHandler()
     val lexer = Lexer(problems)
     val parser = Parser(lexer, problems)
 
