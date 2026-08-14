@@ -13,9 +13,7 @@ class Span : Spanned {
 
         fun between(from: Spanned, to: Spanned): Span {
             require(from.span().index() == to.span().index()) {
-                "不能使用index不同的Span: Span.between(${from.span().toStructuralString()},${
-                    to.span().toStructuralString()
-                })"
+                "不能使用index不同的Span: Span.between(${from.span()},${to.span()})"
             }
             return between(
                 from.span().index(),
@@ -24,6 +22,7 @@ class Span : Spanned {
             )
         }
     }
+
     private val bits: Long
 
     constructor(index: Int, start: Int, len: Int) {
@@ -54,14 +53,7 @@ class Span : Spanned {
         return start() + len()
     }
 
-    /**
-     * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[bits],[index],[start]和[len]属性
-     *
-     * 要使用不忽略属性的方法，请使用[toStructuralString]
-     */
-    override fun toString(): String = "Span"
-
-    fun toStructuralString(): String = "Span{${index()},${start()},${len()}}"
+    override fun toString(): String = "Span{${index()},${start()},${len()}}"
 
     /**
      * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[bits],[index],[start]和[len]属性
@@ -93,5 +85,4 @@ class Span : Spanned {
     fun structuralHashCode(): Int {
         return bits.hashCode()
     }
-
 }

@@ -13,7 +13,7 @@ data class Token(
         "Token{${type.name},$literal}"
 
     fun toStringWithSpan(): String =
-        "Token{${type.name},$literal,${span.toStructuralString()}}"
+        "Token{${type.name},$literal,$span}"
 
     override fun span(): Span {
         return span
