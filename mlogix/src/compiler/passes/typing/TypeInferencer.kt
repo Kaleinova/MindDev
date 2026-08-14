@@ -16,6 +16,7 @@ import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
 import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.ir.ResolutionResult
+import mlogix.util.I18N.bundle
 
 /**
  * 类型推断：约束生成 + 惰性求解（HM 风格）。
@@ -166,8 +167,8 @@ class TypeInferencer(val problems: DiagHandler) {
                     val defId = lhsIdent.defId
                     if (defId == null) {
                         val lhsName = (lhsIdent.token.literal as? String) ?: lhsIdent.token.type.toString()
-                        error("未声明的变量: $lhsName")
-                            .label(lhsIdent, "未找到此变量的声明")
+                        error(bundle.format("diag.undeclared-variable", lhsName))
+                            .label(lhsIdent, bundle.get("diag.undeclared-variable.help"))
                     } else {
                         val symbol = symbolTable.get(defId)
                         if (symbol != null) {
@@ -286,7 +287,8 @@ class TypeInferencer(val problems: DiagHandler) {
                 val defId = expr.defId
                 if (defId == null) {
                     val name = (expr.token.literal as? String) ?: expr.token.type.toString()
-                    error("未声明的标识符: $name").label(expr, "未找到此标识符的定义")
+                    error(bundle.format("diag.undeclared-identifier", name))
+                        .label(expr, bundle.get("diag.undeclared-identifier.help"))
                     InferResult(BuiltinType.Unknown, Seq(0))
                 } else {
                     val symbol = symbolTable.get(defId)
@@ -486,8 +488,8 @@ class TypeInferencer(val problems: DiagHandler) {
         val variants = annotation.annotations
         if (variants.isEmpty) return BuiltinType.Unknown
         if (variants.size > 1) {
-            error("联合/枚举类型注解暂不支持类型检查")
-                .label(annotation, "请改用单一类型注解，如 `a: Int`")
+            error(bundle.get("diag.union-not-supported"))
+                .label(annotation, bundle.get("diag.union-not-supported.help"))
             return Type.Error
         }
         return variantToType(variants[0])

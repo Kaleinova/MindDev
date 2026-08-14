@@ -231,7 +231,7 @@ class Lexer(private val problems: DiagHandler) {
                 '.' -> return token(TokenType.DOT)
 
                 '。' -> {
-                    error("应该使用英文符号`.`")
+                    error(bundle.format("diag.use-fullwidth-char", "."))
                         .label(span(start, start + 1), "")
                     return token(TokenType.DOT)
                 }
@@ -245,7 +245,7 @@ class Lexer(private val problems: DiagHandler) {
                 }
 
                 '：' -> {
-                    error("应该使用英文符号`:`")
+                    error(bundle.format("diag.use-fullwidth-char", ":"))
                         .label(span(start, start + 1), "")
                     return if (match('<')) {
                         token(TokenType.COLON_LESS)
@@ -259,7 +259,7 @@ class Lexer(private val problems: DiagHandler) {
                 ';' -> return token(TokenType.SEMICOLON)
 
                 '；' -> {
-                    error("应该使用英文符号`;`")
+                    error(bundle.format("diag.use-fullwidth-char", ";"))
                         .label(span(start, start + 1), "")
                     return token(TokenType.SEMICOLON)
                 }
@@ -267,7 +267,7 @@ class Lexer(private val problems: DiagHandler) {
                 ',' -> return token(TokenType.COMMA)
 
                 '，' -> {
-                    error("应该使用英文符号`,`")
+                    error(bundle.format("diag.use-fullwidth-char", ","))
                         .label(span(start, start + 1), "")
                     return token(TokenType.COMMA)
                 }
@@ -275,7 +275,7 @@ class Lexer(private val problems: DiagHandler) {
                 '(' -> return token(TokenType.LPAREN)
 
                 '（' -> {
-                    error("应该使用英文符号`(`")
+                    error(bundle.format("diag.use-fullwidth-char", "("))
                         .label(span(start, start + 1), "")
                     return token(TokenType.LPAREN)
                 }
@@ -283,7 +283,7 @@ class Lexer(private val problems: DiagHandler) {
                 ')' -> return token(TokenType.RPAREN)
 
                 '）' -> {
-                    error("应该使用英文符号`)`")
+                    error(bundle.format("diag.use-fullwidth-char", ")"))
                         .label(span(start, start + 1), "")
                     return token(TokenType.RPAREN)
                 }
@@ -291,7 +291,7 @@ class Lexer(private val problems: DiagHandler) {
                 '[' -> return token(TokenType.LBRACKET)
 
                 '【' -> {
-                    error("应该使用英文符号`[`")
+                    error(bundle.format("diag.use-fullwidth-char", "["))
                         .label(span(start, start + 1), "")
                     return token(TokenType.LBRACKET)
                 }
@@ -299,7 +299,7 @@ class Lexer(private val problems: DiagHandler) {
                 ']' -> return token(TokenType.RBRACKET)
 
                 '】' -> {
-                    error("应该使用英文符号`]`")
+                    error(bundle.format("diag.use-fullwidth-char", "]"))
                         .label(span(start, start + 1), "")
                     return token(TokenType.RBRACKET)
                 }
@@ -309,7 +309,7 @@ class Lexer(private val problems: DiagHandler) {
                 '?' -> return token(TokenType.QUESTION_MARK)
 
                 '？' -> {
-                    error("应该使用英文符号`?`")
+                    error(bundle.format("diag.use-fullwidth-char", "?"))
                         .label(span(start, start + 1), "")
                     return token(TokenType.QUESTION_MARK)
                 }
@@ -317,13 +317,13 @@ class Lexer(private val problems: DiagHandler) {
                 '"' -> return string()
 
                 '“' -> {
-                    error("字符串应该使用英文双引号`\"`")
+                    error(bundle.format("diag.use-fullwidth-char", "“"))
                         .label(span(start, start + 1), "\"")
                     return string()
                 }
 
                 '”' -> {
-                    error("字符串应该使用英文双引号`\"`")
+                    error(bundle.format("diag.use-fullwidth-char", "”"))
                         .label(span(start, start + 1), "\"")
                     return string()
                 }
@@ -357,7 +357,7 @@ class Lexer(private val problems: DiagHandler) {
                 } else if (isIdentifierStart(c)) {
                     return identifier()
                 } else {
-                    error("未注册的字符")
+                    error(bundle.get("diag.unregistered-char"))
                         .label(
                             span(start, start + 1),
                             "0x${Integer.toHexString(c.code).uppercase(getDefault())}"
@@ -374,8 +374,8 @@ class Lexer(private val problems: DiagHandler) {
         while (!this.isAtEnd && isIdentifierPart(peek())) advance()
         val text = subString(start, current)
         if (text.startsWith("__")) {
-            error("非法的标识符")
-                .label(span(start, start + 2), "不能以`__`开头，将被替换为`_`")
+            error(bundle.get("diag.invalid-identifier"))
+                .label(span(start, start + 2), bundle.get("diag.invalid-identifier.help"))
             return token(TokenType.IDENTIFIER, text.substring(1))
         }
         val type = TokenType.KEYWORDS_MAP[text]
@@ -389,13 +389,13 @@ class Lexer(private val problems: DiagHandler) {
     private fun string(): Token {
         while (!match('"')) {
             if (this.isAtEnd || check('\n')) {
-                error("未匹配到字符串末尾`\"`")
-                    .label(span(start, start + 1), "字符串头部")
-                    .label(span(current, current + 1), "匹配末尾")
+                error(bundle.format("diag.unclosed-string", "\""))
+                    .label(span(current, current + 1), "")
+                    .label(span(start, start + 1), bundle.get("diag.unclosed-string.start"))
                 return token(TokenType.STR, subString(start + 1, current))
             }
             if (match('”')) {
-                warning("字符串应该使用英文双引号`\"`")
+                warning(bundle.format("diag.use-fullwidth-char", "”"))
                     .label(span(start, start + 1), "\"")
                 break
             }
@@ -408,7 +408,7 @@ class Lexer(private val problems: DiagHandler) {
         if (match('x')) {
             // 16进制整数 _分隔符
             if (peek(-2) != '0') {
-                error("16进制数字应以`0x`开头")
+                error(bundle.get("diag.invalid-hex-prefix"))
                     .label(span(start, start + 2), "")
                 recover { c: Char? -> !isDigit(c!!) && !isAlpha(c) }
                 return token(TokenType.ERROR)
@@ -421,7 +421,7 @@ class Lexer(private val problems: DiagHandler) {
                     // 忽略数字分隔符
                 } else if (isAlpha(peek())) {
                     // ['g' ~ 'z'] | ['G' ~ 'Z']
-                    error("16进制数字不包括的字符")
+                    error(bundle.get("diag.invalid-hex-char"))
                         .label(span(current, current + 1), Integer.toHexString(peek().code))
                     recover { c: Char? -> !isDigit(c!!) && !isAlpha(c) }
                     return token(TokenType.ERROR)
@@ -435,7 +435,7 @@ class Lexer(private val problems: DiagHandler) {
         } else if (match('b')) {
             // 2进制整数 _分隔符
             if (peek(-2) != '0') {
-                error("2进制数字应以`0b`开头")
+                error(bundle.get("diag.invalid-bin-prefix"))
                     .label(span(start, start + 2), "")
                 recover { c: Char? -> !isDigit(c!!) && !isAlpha(c) }
                 return token(TokenType.ERROR)
@@ -447,7 +447,7 @@ class Lexer(private val problems: DiagHandler) {
                 } else if (check('_')) {
                     // 忽略数字分隔符
                 } else if (isAlpha(peek())) {
-                    error("2进制数字不包括的字符")
+                    error(bundle.get("diag.invalid-bin-char"))
                         .label(span(current, current + 1), Integer.toHexString(peek().code))
                     recover { c: Char? -> !isDigit(c!!) && !isAlpha(c) }
                     return token(TokenType.ERROR)
@@ -508,7 +508,7 @@ class Lexer(private val problems: DiagHandler) {
         if (this.isAtEnd) return
         val c = peek()
         if (c == '_') {
-            error("数字两端不允许分隔符`_`")
+            error(bundle.get("diag.invalid-num-separator"))
                 .label(span(current, current + 1), Integer.toHexString(c.code))
             advance()
         }
@@ -521,7 +521,7 @@ class Lexer(private val problems: DiagHandler) {
             } else if (c == 'e' || c == 'E') {
                 break
             } else if (isAlpha(c)) {
-                error("数字中不期望的字符")
+                error(bundle.get("diag.unexpected-num-char"))
                     .label(span(current, current + 1), Integer.toHexString(c.code))
                 recover { c: Char -> !isDigit(c) && !isAlpha(c) }
                 break
@@ -532,7 +532,7 @@ class Lexer(private val problems: DiagHandler) {
         }
 
         if (builder[builder.length - 1] == '_') {
-            error("数字两端不允许分隔符`_`")
+            error(bundle.get("diag.invalid-num-separator"))
                 .label(span(current, current + 1), Integer.toHexString(c.code))
         }
     }
@@ -577,13 +577,13 @@ class Lexer(private val problems: DiagHandler) {
                 return token(TokenType.COL, Color.toDoubleBits(it.r, it.g, it.b, it.a))
             }
             Colors.get(text.uppercase())?.also {
-                error("未知的内置颜色名: $text")
-                    .label(span(start, current), "你想写的是${text.uppercase()}吗？")
+                error(bundle.format("diag.unknown-color-name", text))
+                    .label(span(start, current), bundle.format("diag.unknown-color-name.help", text.uppercase()))
                 return token(TokenType.COL, Color.toDoubleBits(it.r, it.g, it.b, it.a))
             }
             Colors.get(text.lowercase().filterNot { it == '_' })?.also {
-                error("未知的内置颜色名: $text")
-                    .label(span(start, current), "你想写的是${text.lowercase()}吗？")
+                error(bundle.format("diag.unknown-color-name", text))
+                    .label(span(start, current), bundle.format("diag.unknown-color-name.help", text.lowercase()))
                 return token(TokenType.COL, Color.toDoubleBits(it.r, it.g, it.b, it.a))
             }
         }
@@ -606,14 +606,14 @@ class Lexer(private val problems: DiagHandler) {
                 }
 
                 else -> {
-                    error("`颜色值`十六进制部分长度应为6或8")
-                        .label(span(start + 1, current), "长度 = " + (text.length))
+                    error(bundle.format("diag.invalid-color-len", text.length))
+                        .label(span(start + 1, current))
                     return token(TokenType.ERROR)
                 }
             }
         }
 
-        error("颜色值应为内置颜色名或16进制数字")
+        error(bundle.get("diag.invalid-color"))
             .label(span(start, current), "")
         return token(TokenType.ERROR)
     }

@@ -9,6 +9,7 @@ import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeVisitor
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.DiagHandler
+import mlogix.util.I18N.bundle
 
 /**
  * Union-Find（并查集）求解器：惰性求解 Equal 约束。
@@ -119,7 +120,7 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
             t1 is Type.Func && t2 is Type.Func -> {
                 if (t1.params.size != t2.params.size) {
                     report(
-                        "函数参数数量不匹配: 声明 ${t2.params.size} 个形参, 传入 ${t1.params.size} 个实参",
+                        bundle.format("diag.arg-count-mismatch", t1.params.size, t2.params.size),
                         pos,
                         declPos
                     )
@@ -135,7 +136,7 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
 
             t1 is Type.TupleType && t2 is Type.TupleType -> {
                 if (t1.elements.size != t2.elements.size) {
-                    report("元组元素数量不匹配: ${t1.elements.size} != ${t2.elements.size}", pos, declPos)
+                    report(bundle.format("diag.tuple-count-mismatch", t1.elements.size, t2.elements.size), pos, declPos)
                     return
                 }
                 for ((i, element) in t1.elements.withIndex()) {
@@ -186,7 +187,7 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
     }
 
     private fun reportOccurs(varT: Type.Var, pos: Span?, declPos: Span?) {
-        report("Occurs check failed for ${varT.index}", pos, declPos)
+        report(bundle.format("diag.occurs-check", varT.index), pos, declPos)
     }
 
     /**
@@ -198,22 +199,22 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
      */
     private fun reportMismatch(t1: Type, t2: Type, pos: Span?, declPos: Span?) {
         val e = Diagnostic.SemanticDiag(
-            "类型不匹配: 期望 ${t2.pretty()}, 实际 ${t1.pretty()}",
+            bundle.format("diag.type-mismatch", t1.pretty(), t2.pretty()),
             Diagnostic.DiagLevel.ERROR,
         )
         problems.addError(e)
-        e.label(pos ?: Span(sourceFile.index, 0, 0), "实际类型: ${t1.pretty()}")
+        e.label(pos ?: Span(sourceFile.index, 0, 0), bundle.format("diag.actual-type", t1.pretty()))
         if (declPos != null) {
-            e.label(declPos, "期望类型: ${t2.pretty()}")
+            e.label(declPos, bundle.format("diag.expected-type", t2.pretty()))
         }
     }
 
     private fun report(text: String, pos: Span?, declPos: Span?) {
         val e = Diagnostic.SemanticDiag(text, Diagnostic.DiagLevel.ERROR)
         problems.addError(e)
-        e.label(pos ?: Span(sourceFile.index, 0, 0), "使用方")
+        e.label(pos ?: Span(sourceFile.index, 0, 0), bundle.get("diag.use-site"))
         if (declPos != null) {
-            e.label(declPos, "声明方")
+            e.label(declPos, bundle.get("diag.decl-site"))
         }
     }
 }

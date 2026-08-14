@@ -16,6 +16,7 @@ import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
 import mlogix.compiler.ir.ResolutionResult
+import mlogix.util.I18N.bundle
 
 /**
  * 名称解析 Pass：构建作用域树，登记定义（分配 [DefId]），挂载 TypeScheme。
@@ -219,7 +220,8 @@ class Resolver(private val problems: DiagHandler) {
                 val name = (expr.token.literal as? String) ?: expr.token.type.toString()
                 val defId = scope.lookup(name)
                 if (defId == null) {
-                    error("未声明的标识符: $name").label(expr, "未找到此标识符的定义")
+                    error(bundle.format("diag.undeclared-identifier", name))
+                        .label(expr, bundle.get("diag.undeclared-identifier.help"))
                 } else {
                     expr.defId = defId
                 }
@@ -288,7 +290,8 @@ class Resolver(private val problems: DiagHandler) {
      */
     private fun declare(name: String, type: Type, span: Span, scope: Scope): Symbol? {
         if (scope.containsLocal(name)) {
-            error("重复定义: $name").label(span, "此名称已在当前作用域声明")
+            error(bundle.format("diag.duplicate-definition", name))
+                .label(span, bundle.get("diag.duplicate-definition.help"))
             return null
         }
         val symbol = symbolTable.declare(name, type, span)
@@ -312,7 +315,8 @@ class Resolver(private val problems: DiagHandler) {
                 val name = (expr.token.literal as? String) ?: expr.token.type.toString()
                 val defId = scope.lookup(name)
                 if (defId == null) {
-                    error("未声明的类型名: $name").label(expr, "未找到此类型名的定义")
+                    error(bundle.format("diag.undeclared-type-name", name))
+                        .label(expr, bundle.get("diag.undeclared-type-name.help"))
                 } else {
                     expr.defId = defId
                 }
