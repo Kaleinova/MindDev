@@ -62,13 +62,6 @@ abstract class Diagnostic(
         Replace('~'),
     }
 
-//    /** Help的标签样式 */
-//    enum class Edition(val marker: Char) {
-//        Insert('+'),
-//        Delete('-'),
-//        Replace('~'),
-//    }
-
     /** 一个带位置与样式的标签 */
     data class Label(val span: Span, val text: String, val style: LabelStyle)
 
@@ -120,20 +113,23 @@ abstract class Diagnostic(
             val levelColor = if (level == DiagLevel.ERROR) Ansi.RED else Ansi.YELLOW
             // error/warning: ......
             append("$levelColor${level.name.lowercase()}: $message${Ansi.DEFAULT}\n")
-            if (sourceMap == null || labels.isEmpty) return toString()
+            if (sourceMap == null) return toString()
             val maxLineStrLen = maxLineStrLen(sourceMap, labels, suggestions)
+            var primary: Label? = null
+            var primaryFile: SourceFile? = null
 
-            // 按文件分组（主标签所在文件在最前）
-            val groups = groupByFile(labels)
-            val primary = labels[0]
-            val primaryFile = sourceMap.getSourceFile(primary.span.index())
-            if (primaryFile != null) {
-                append(renderSnippet(primaryFile, groups[0], "-->", maxLineStrLen))
-            }
+            if (!labels.isEmpty) {// 按文件分组（主标签所在文件在最前）
+                val groups = groupByFile(labels)
+                primary = labels[0]
+                primaryFile = sourceMap.getSourceFile(primary.span.index())
+                if (primaryFile != null) {
+                    append(renderSnippet(primaryFile, groups[0], "-->", maxLineStrLen))
+                }
 
-            for (secondary in groups.iterator().also { it.next() }) {
-                val secondaryFile = sourceMap.getSourceFile(secondary.first().span.index()) ?: continue
-                append(renderSnippet(secondaryFile, secondary, ":::", maxLineStrLen))
+                for (secondary in groups.iterator().also { it.next() }) {
+                    val secondaryFile = sourceMap.getSourceFile(secondary.first().span.index()) ?: continue
+                    append(renderSnippet(secondaryFile, secondary, ":::", maxLineStrLen))
+                }
             }
 
             for (suggestion in suggestions) {
@@ -141,11 +137,12 @@ abstract class Diagnostic(
                     renderSuggestion(
                         sourceMap,
                         suggestion,
-                        primaryFile?.getLine(primary.span.start()) ?: -1,
+                        primaryFile?.getLine(primary!!.span.start()) ?: -1,
                         maxLineStrLen,
                     )
                 )
             }
+            append("\n")
         }
     }
 
@@ -295,7 +292,7 @@ abstract class Diagnostic(
                 append(" ".repeat(maxLineStrLen))
                 append(" = ${Ansi.DEFAULT}$identify: ${suggestion.text}\n")
             } else {
-                append("$identify: ${suggestion.text}")
+                append("$identify: ${suggestion.text}\n")
                 // 按文件分组（主标签所在文件在最前）
                 val groups = groupByFile(suggestion.labels)
                 when (suggestion) {
@@ -349,8 +346,8 @@ abstract class Diagnostic(
                 append("${renderBlank(maxLineStrLen)}\n")
                 when (label.style) {
                     LabelStyle.Insert -> {
-                        append(" ".repeat(maxLineStrLen - lineStr.length + 1) + lineStr)
-                        append(Ansi.CYAN + "~ " + Ansi.DEFAULT)
+                        append(" ".repeat(maxLineStrLen - lineStr.length))
+                        append(Ansi.CYAN + lineStr + " ~ " + Ansi.DEFAULT)
                         append(file.getLineString(line).replaceRange(col, col, label.text))
                         append("\n")
                         append(renderBlank(maxLineStrLen))
@@ -358,8 +355,8 @@ abstract class Diagnostic(
                     }
 
                     LabelStyle.Delete -> {
-                        append(" ".repeat(maxLineStrLen - lineStr.length + 1) + lineStr)
-                        append(Ansi.CYAN + "~ " + Ansi.DEFAULT)
+                        append(" ".repeat(maxLineStrLen - lineStr.length))
+                        append(Ansi.CYAN + lineStr + " ~ " + Ansi.DEFAULT)
                         append(file.getLineString(line))
                         append("\n")
                         append(renderBlank(maxLineStrLen))
@@ -367,11 +364,12 @@ abstract class Diagnostic(
                     }
 
                     LabelStyle.Replace -> {
-                        append(" ".repeat(maxLineStrLen - lineStr.length + 1) + lineStr)
-                        append(Ansi.RED + "- " + Ansi.DEFAULT)
+                        append(" ".repeat(maxLineStrLen - lineStr.length))
+                        append(Ansi.RED + lineStr + " - " + Ansi.DEFAULT)
                         append(file.getLineString(line) + "\n")
-                        append(" ".repeat(maxLineStrLen - lineStr.length + 1) + lineStr)
-                        append(Ansi.GREEN + "+ " + Ansi.DEFAULT)
+
+                        append(" ".repeat(maxLineStrLen - lineStr.length))
+                        append(Ansi.GREEN + lineStr + " + " + Ansi.DEFAULT)
                         append(
                             file.getLineString(line).replaceRange(
                                 col,
@@ -384,9 +382,6 @@ abstract class Diagnostic(
 
                     else -> error("Unreachable")
                 }
-                append(
-                    "${Ansi.CYAN}${" ".repeat(maxLineStrLen - lineStr.length)}$lineStr | ${Ansi.DEFAULT}"
-                )
             }
         }
     }

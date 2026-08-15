@@ -173,8 +173,7 @@ class Lexer(private val problems: DiagHandler) {
                 }
 
                 '！' -> {
-                    error(bundle.format("diag.use-fullwidth-char", "！"))
-                        .label(span(start, start + 1), bundle.format("diag.use-fullwidth-char.help", "!"))
+                    reportConfusedChar('！', start)
                     return if (match('=')) {
                         if (match('=')) {
                             token(TokenType.BANG_EQ_EQ)
@@ -231,8 +230,7 @@ class Lexer(private val problems: DiagHandler) {
                 '.' -> return token(TokenType.DOT)
 
                 '。' -> {
-                    error(bundle.format("diag.use-fullwidth-char", "."))
-                        .label(span(start, start + 1), "")
+                    reportConfusedChar('。', start)
                     return token(TokenType.DOT)
                 }
 
@@ -245,8 +243,7 @@ class Lexer(private val problems: DiagHandler) {
                 }
 
                 '：' -> {
-                    error(bundle.format("diag.use-fullwidth-char", ":"))
-                        .label(span(start, start + 1), "")
+                    reportConfusedChar('：', start)
                     return if (match('<')) {
                         token(TokenType.COLON_LESS)
                     } else if (match('=')) {
@@ -259,48 +256,42 @@ class Lexer(private val problems: DiagHandler) {
                 ';' -> return token(TokenType.SEMICOLON)
 
                 '；' -> {
-                    error(bundle.format("diag.use-fullwidth-char", ";"))
-                        .label(span(start, start + 1), "")
+                    reportConfusedChar('；', start)
                     return token(TokenType.SEMICOLON)
                 }
 
                 ',' -> return token(TokenType.COMMA)
 
                 '，' -> {
-                    error(bundle.format("diag.use-fullwidth-char", ","))
-                        .label(span(start, start + 1), "")
+                    reportConfusedChar('，', start)
                     return token(TokenType.COMMA)
                 }
 
                 '(' -> return token(TokenType.LPAREN)
 
                 '（' -> {
-                    error(bundle.format("diag.use-fullwidth-char", "("))
-                        .label(span(start, start + 1), "")
+                    reportConfusedChar('（', start)
                     return token(TokenType.LPAREN)
                 }
 
                 ')' -> return token(TokenType.RPAREN)
 
                 '）' -> {
-                    error(bundle.format("diag.use-fullwidth-char", ")"))
-                        .label(span(start, start + 1), "")
+                    reportConfusedChar('）', start)
                     return token(TokenType.RPAREN)
                 }
 
                 '[' -> return token(TokenType.LBRACKET)
 
                 '【' -> {
-                    error(bundle.format("diag.use-fullwidth-char", "["))
-                        .label(span(start, start + 1), "")
+                    reportConfusedChar('【', start)
                     return token(TokenType.LBRACKET)
                 }
 
                 ']' -> return token(TokenType.RBRACKET)
 
                 '】' -> {
-                    error(bundle.format("diag.use-fullwidth-char", "]"))
-                        .label(span(start, start + 1), "")
+                    reportConfusedChar('】', start)
                     return token(TokenType.RBRACKET)
                 }
 
@@ -309,22 +300,19 @@ class Lexer(private val problems: DiagHandler) {
                 '?' -> return token(TokenType.QUESTION_MARK)
 
                 '？' -> {
-                    error(bundle.format("diag.use-fullwidth-char", "?"))
-                        .label(span(start, start + 1), "")
+                    reportConfusedChar('？', start)
                     return token(TokenType.QUESTION_MARK)
                 }
 
                 '"' -> return string()
 
                 '“' -> {
-                    error(bundle.format("diag.use-fullwidth-char", "“"))
-                        .label(span(start, start + 1), "\"")
+                    reportConfusedChar('“', start)
                     return string()
                 }
 
                 '”' -> {
-                    error(bundle.format("diag.use-fullwidth-char", "”"))
-                        .label(span(start, start + 1), "\"")
+                    reportConfusedChar('”', start)
                     return string()
                 }
 
@@ -374,8 +362,11 @@ class Lexer(private val problems: DiagHandler) {
         while (!this.isAtEnd && isIdentifierPart(peek())) advance()
         val text = subString(start, current)
         if (text.startsWith("__")) {
-            error(bundle.get("diag.invalid-identifier"))
-                .label(span(start, start + 2), bundle.get("diag.invalid-identifier.help"))
+            error(bundle.get("diag.invalid-identifier")).apply{
+                label(span(start, start + 2))
+                help(bundle.get("diag.invalid-identifier.help"))
+                    .delete(span(start, start + 1))
+            }
             return token(TokenType.IDENTIFIER, text.substring(1))
         }
         val type = TokenType.KEYWORDS_MAP[text]
@@ -390,13 +381,13 @@ class Lexer(private val problems: DiagHandler) {
         while (!match('"')) {
             if (this.isAtEnd || check('\n')) {
                 error(bundle.format("diag.unclosed-string", "\""))
-                    .label(span(current, current + 1), "")
+                    .label(span(current, current + 1))
                     .label(span(start, start + 1), bundle.get("diag.unclosed-string.start"))
                 return token(TokenType.STR, subString(start + 1, current))
             }
-            if (match('”')) {
-                warning(bundle.format("diag.use-fullwidth-char", "”"))
-                    .label(span(start, start + 1), "\"")
+            if (check('”')) {
+                reportConfusedChar('”', current)
+                advance()
                 break
             }
             advance()
@@ -658,6 +649,18 @@ class Lexer(private val problems: DiagHandler) {
         }
     }
 
+    private fun reportConfusedChar(char: Char, index: Int) {
+        val value = confusedChars[char]
+        if (value != null) {
+            error(bundle.format("diag.use-fullwidth-char", char.toString())).apply {
+                val char = span(index, index + 1)
+                label(char)
+                help(bundle.format("diag.use-fullwidth-char.help", value.toString()))
+                    .replace(char, value.toString())
+            }
+        }
+    }
+
     private fun isAlpha(c: Char): Boolean {
         return (c in 'a'..'z')
                 || (c in 'A'..'Z')
@@ -821,7 +824,7 @@ class Lexer(private val problems: DiagHandler) {
         return w
     }
 
-    /** 用当前文件索引构造 span，供 label/label 使用 */
+    /** 用当前文件索引构造 span，供 label 使用 */
     private fun span(from: Int, to: Int): Span = Span.between(sourceFile.index, from, to)
 
     fun createSnapshot(): LexerSnapshot {
@@ -835,4 +838,21 @@ class Lexer(private val problems: DiagHandler) {
     }
 
     data class LexerSnapshot(val start: Int, val current: Int, val isPrevNewline: Boolean)
+
+    companion object {
+        val confusedChars = mapOf(
+            '！' to '!',
+            '。' to '.',
+            '：' to ':',
+            '；' to '；',
+            '，' to ',',
+            '（' to '(',
+            '）' to ')',
+            '【' to '[',
+            '】' to ']',
+            '？' to '?',
+            '“' to '"',
+            '”' to '"',
+        )
+    }
 }

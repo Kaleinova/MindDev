@@ -12,9 +12,9 @@ import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
+import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
-import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.ir.ResolutionResult
 import mlogix.util.I18N.bundle
 
@@ -286,10 +286,9 @@ class TypeInferencer(val problems: DiagHandler) {
             is Expr.Identifier -> {
                 val defId = expr.defId
                 if (defId == null) {
-                    val name = (expr.token.literal as? String) ?: expr.token.type.toString()
-                    error(bundle.format("diag.undeclared-identifier", name))
-                        .label(expr, bundle.get("diag.undeclared-identifier.help"))
-                    InferResult(BuiltinType.Unknown, Seq(0))
+                    // Resolver 已报 diag.undeclared-identifier（名称解析归它管），
+                    // 这里静默降级为 Unknown，避免同一错误重复上报。
+                    InferResult(BuiltinType.Error, Seq(0))
                 } else {
                     val symbol = symbolTable.get(defId)
                     if (symbol == null) {
