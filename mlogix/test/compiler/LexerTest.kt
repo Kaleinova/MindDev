@@ -1,13 +1,13 @@
 package mlogix.compiler
 
 import arc.struct.Seq
+import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.core.token.TokenType.*
 import mlogix.compiler.diagnostic.DiagHandler
-import mlogix.compiler.core.span.Span
 import mlogix.compiler.passes.parsing.Lexer
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class LexerTest {
@@ -49,7 +49,7 @@ class LexerTest {
             token(COLON), token(COLON_ASSIGN), token(COLON_LESS), token(ARROW), token(SEMICOLON), token(COMMA), token(DOT),
             token(LPAREN), token(RPAREN), token(LBRACKET), token(RBRACKET), token(LBRACE), token(RBRACE)
         )
-        // Note: some tokenizers may produce NEWLINE/EOF tokens; we keep equality strict as in the original test
+        // Suggestion: some tokenizers may produce NEWLINE/EOF tokens; we keep equality strict as in the original test
         assertEquals(expected, tokens, "Operators & separators 必须被正确分词")
     }
 
