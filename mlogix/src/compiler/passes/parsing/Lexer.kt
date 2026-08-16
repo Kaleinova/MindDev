@@ -362,7 +362,7 @@ class Lexer(private val problems: DiagHandler) {
         while (!this.isAtEnd && isIdentifierPart(peek())) advance()
         val text = subString(start, current)
         if (text.startsWith("__")) {
-            error(bundle.get("diag.invalid-identifier")).apply{
+            error(bundle.get("diag.invalid-identifier")).apply {
                 label(span(start, start + 2))
                 help(bundle.get("diag.invalid-identifier.help"))
                     .delete(span(start, start + 1))
@@ -567,14 +567,20 @@ class Lexer(private val problems: DiagHandler) {
             Colors.get(text)?.also {
                 return token(TokenType.COL, Color.toDoubleBits(it.r, it.g, it.b, it.a))
             }
-            Colors.get(text.uppercase())?.also {
-                error(bundle.format("diag.unknown-color-name", text))
-                    .label(span(start, current), bundle.format("diag.unknown-color-name.help", text.uppercase()))
+            var attempt = text.lowercase().filterNot { it == '_' }
+            Colors.get(attempt)?.also {
+                error(bundle.format("diag.unknown-color-name", text)).apply {
+                    label(span(start, current))
+                    help(bundle.format("diag.unknown-color-name.help", attempt))
+                }
                 return token(TokenType.COL, Color.toDoubleBits(it.r, it.g, it.b, it.a))
             }
-            Colors.get(text.lowercase().filterNot { it == '_' })?.also {
-                error(bundle.format("diag.unknown-color-name", text))
-                    .label(span(start, current), bundle.format("diag.unknown-color-name.help", text.lowercase()))
+            attempt = text.uppercase()
+            Colors.get(attempt)?.also {
+                error(bundle.format("diag.unknown-color-name", text)).apply {
+                    label(span(start, current))
+                    help(bundle.format("diag.unknown-color-name.help", attempt))
+                }
                 return token(TokenType.COL, Color.toDoubleBits(it.r, it.g, it.b, it.a))
             }
         }
@@ -620,7 +626,9 @@ class Lexer(private val problems: DiagHandler) {
                 }
                 docComment.append(advance())
             }
-            return token(TokenType.DOC_COMMENT, docComment.toString())
+            // return token(TokenType.DOC_COMMENT, docComment.toString())
+            // TODO 实装docComment
+            return null
         } else if (match('|')) { // 文档注释开始 #|
             // int col = sourceFile.getCol(current - 1) - 1;
             while (!this.isAtEnd) {
@@ -635,7 +643,9 @@ class Lexer(private val problems: DiagHandler) {
                 }
                 docComment.append(advance())
             }
-            return token(TokenType.DOC_COMMENT, docComment.toString())
+            // return token(TokenType.DOC_COMMENT, docComment.toString())
+            // TODO 实装docComment
+            return null
         } else if (match('*')) { // 多行注释开始 #*
             while (!this.isAtEnd && !match("*#")) { // #* ... *#
                 advance()
