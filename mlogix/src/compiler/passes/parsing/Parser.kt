@@ -85,7 +85,7 @@ class Parser(
         check(TokenType.SET) -> setStmt()
 
         else -> {
-            loopStmtWithFlag() ?: exprStmt()
+            loopStmtWithLabel() ?: exprStmt()
         }
     }
 
@@ -137,7 +137,7 @@ class Parser(
                 else -> break
             }
         }
-        error(bundle.get("diag.expect-use-item"))
+        error(bundle.get("diag.miss-use-item"))
             .label(lookAhead(0), "")
         recoverByTokenTree(TokenType.RECOVERY)
         return null
@@ -149,7 +149,7 @@ class Parser(
         val stmts = Seq<Stmt>()
         while (!check(TokenType.RBRACE)) {
             if (isAtEnd) {
-                error(bundle.get("diag.expect-block-end"))
+                error(bundle.get("diag.miss-block-end"))
                     .label(lBrace, bundle.get("diag.start"))
                     .label(lookAhead(0), bundle.get("diag.current"))
                 return BlockStmt(between(lBrace, prevToken), stmts)
@@ -190,7 +190,7 @@ class Parser(
         val scrutinee = expression()
 
         if (consume(TokenType.LBRACE) == null) {
-            error(bundle.get("diag.expect-match-brace"))
+            error(bundle.get("diag.miss-match-brace"))
                 .label(start, bundle.get("diag.stmt-start"))
                 .label(lookAhead(0), bundle.get("diag.current"))
             return MatchStmt(between(start, scrutinee), scrutinee, null)
@@ -199,7 +199,7 @@ class Parser(
         val branches = Seq<MatchStmt.MatchBranch>()
         while (!match(TokenType.RBRACE)) {
             if (isAtEnd) {
-                error(bundle.get("diag.expect-match-end"))
+                error(bundle.get("diag.miss-match-end"))
                     .label(start, bundle.get("diag.stmt-start"))
                     .label(lookAhead(0), bundle.get("diag.current"))
                 return MatchStmt(
@@ -287,7 +287,7 @@ class Parser(
     }
 
 
-    private fun loopStmtWithFlag(): Stmt? {
+    private fun loopStmtWithLabel(): Stmt? {
         val snapshot = createSnapshot()
         if (check(TokenType.IDENTIFIER)) {
             val flag = next()
@@ -296,9 +296,9 @@ class Parser(
                 if (check(TokenType.WHILE)) return whileStmt(Expr.Identifier(flag))
             }
             if (check(TokenType.COLON)) {
-                // 冒号跟flag不在同一行
+                // 冒号跟label不在同一行
                 error(bundle.get("diag.loop-label-same-line"))
-                    .label(flag, bundle.get("diag.label"))
+                    .label(flag, bundle.get("diag.loop-label"))
                     .label(next(), "")
                 if (check(TokenType.FOR)) return forStmt(Expr.Identifier(flag))
                 if (check(TokenType.WHILE)) return whileStmt(Expr.Identifier(flag))
@@ -313,6 +313,7 @@ class Parser(
         val start = next()
 
         val name = consume(TokenType.IDENTIFIER) { e -> e.label(start, bundle.get("diag.fn-requires-name")) }
+        val name = consume(TokenType.IDENTIFIER) { e -> e.label(start, bundle.get("diag.miss-fn-name")) }
         val lParen: Token?
         if (name == null) {
             if (!check(TokenType.LPAREN)) {
@@ -320,7 +321,7 @@ class Parser(
             }
             lParen = next()
         } else {
-            lParen = consume(TokenType.LPAREN) { e -> e.label(start, bundle.get("diag.fn-requires-params")) }
+            lParen = consume(TokenType.LPAREN) { e -> e.label(start, bundle.get("diag.miss-fn-params")) }
             if (lParen == null) {
                 return FnStmt(between(start, name), name, null, null, null)
             }
@@ -330,7 +331,7 @@ class Parser(
         val parameters = seq(
             {
                 consume(TokenType.IDENTIFIER) { e ->
-                    e.label(lookAhead(0), bundle.get("diag.param-ident"))
+                    e.label(lookAhead(0), bundle.get("diag.miss-ident-as-param"))
                 }?.let {
                     val expr = annotation(Expr.Identifier(it))
                     isSeparatorOptional = expr !is Expr.Annotation
@@ -339,10 +340,10 @@ class Parser(
             },
             EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
             { isSeparatorOptional },
-            { error(bundle.get("diag.param-separator")).label(lParen, bundle.get("diag.param-start")) },
+            { error(bundle.get("diag.miss-param-separator")).label(lParen, bundle.get("diag.param-start")) },
             TokenType.RPAREN,
             true,
-            { error(bundle.get("diag.param-end")).label(lParen, bundle.get("diag.param-start")) }
+            { error(bundle.get("diag.miss-param-end")).label(lParen, bundle.get("diag.param-start")) }
         )
 
         val results = Seq<Expr>(3)
@@ -361,7 +362,7 @@ class Parser(
                 seq(
                     {
                         consume(TokenType.IDENTIFIER) { e ->
-                            e.label(lookAhead(0), bundle.get("diag.result-ident"))
+                            e.label(lookAhead(0), bundle.get("diag.miss-ident-as-result"))
                         }?.let {
                             val expr = annotation(Expr.Identifier(it))
                             isSeparatorOptional = expr !is Expr.Annotation
@@ -370,13 +371,13 @@ class Parser(
                     },
                     EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
                     { isSeparatorOptional },
-                    { error(bundle.get("diag.result-separator")).label(arrow, bundle.get("diag.result-start")) },
+                    { error(bundle.get("diag.miss-result-separator")).label(arrow, bundle.get("diag.result-start")) },
                     TokenType.LBRACE,
                     false,
-                    { error(bundle.get("diag.result-brace")).label(lParen, bundle.get("diag.param-start")) }
+                    { error(bundle.get("diag.miss-result-brace")).label(lParen, bundle.get("diag.param-start")) }
                 ))
             if (results.isEmpty) {
-                error(bundle.get("diag.arrow-requires-return"))
+                error(bundle.get("diag.miss-result-decl-after-arrow"))
                     .label(arrow, "")
             }
         }
@@ -693,9 +694,11 @@ class Parser(
                         }
                         val innerExpr = expression()
                         if (innerExpr is ErrorExpr) {
-                            error(bundle.get("diag.call-end"))
-                                .label(lParen, bundle.get("diag.arg-start"))
-                                .label(lookAhead(0), bundle.get("diag.end"))
+                            error(bundle.get("diag.miss-call-end")).apply{
+                                label(lParen, bundle.get("diag.arg-start"))
+                                help(bundle.get("miss-arg-end.help"))
+                                    .insert(lookAhead(0), ")")
+                            }
                             expr = Expr.Call(between(expr, arguments.lastOrNull() ?: lParen), expr, arguments)
                             break
                         }
@@ -741,15 +744,15 @@ class Parser(
                 { expression() },
                 EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
                 { true },
-                { error(bundle.get("diag.array-separator")).label(lBrace, bundle.get("diag.array-start")) },
+                { error(bundle.get("diag.miss-array-separator")).label(lBrace, bundle.get("diag.array-start")) },
                 TokenType.RBRACE,
                 true,
-                { error(bundle.get("diag.array-end")).label(lBrace, bundle.get("diag.array-start")) }
+                { error(bundle.get("diag.miss-array-end")).label(lBrace, bundle.get("diag.array-start")) }
             )
             return Expr.Array(between(lBrace, prevToken), elements)
         }
 
-        error(bundle.get("diag.expect-expression")).label(lookAhead(0), "")
+        error(bundle.get("diag.miss-expression")).label(lookAhead(0), "")
         return ErrorExpr(next().span)
     }
 
@@ -804,10 +807,10 @@ class Parser(
             { expression() },
             EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
             { true },
-            { error(bundle.get("diag.tuple-separator")).label(lParen, bundle.get("diag.tuple-start")) },
+            { error(bundle.get("diag.miss-tuple-separator")).label(lParen, bundle.get("diag.tuple-start")) },
             TokenType.RPAREN,
             true,
-            { error(bundle.get("diag.tuple-end")).label(lParen, bundle.get("diag.tuple-start")) }
+            { error(bundle.get("diag.miss-tuple-end")).label(lParen, bundle.get("diag.tuple-start")) }
         )
 //         TODO style提示
         if (elements.size == 1) return elements[0]
@@ -1048,7 +1051,7 @@ class Parser(
     private fun expect(type: TokenType): Token? {
         if (check(type)) return lookAhead(0)
 
-        error(bundle.format("diag.expect-token", type))
+        error(bundle.format("diag.miss-token", type))
             .label(lookAhead(0), type.toString())
         return null
     }
@@ -1060,7 +1063,7 @@ class Parser(
         if (check(type)) return lookAhead(0)
 
         cons.get(
-            error(bundle.format("diag.expect-token", type))
+            error(bundle.format("diag.miss-token", type))
                 .label(lookAhead(0), type.toString()),
         )
         return null
@@ -1089,7 +1092,7 @@ class Parser(
     private fun consumeStmtEnd(): Boolean {
         if (matchStmtEnd()) return true
         // 如果没有找到，报告错误
-        error(bundle.get("diag.missing-stmt-end"))
+        error(bundle.get("diag.miss-stmt-end"))
             .label(lookAhead(0), "")
         return false
     }
@@ -1100,7 +1103,7 @@ class Parser(
     private fun consume(type: TokenType): Token? {
         if (check(type)) return next()
 
-        error(bundle.format("diag.expect-token", type))
+        error(bundle.format("diag.miss-token", type))
             .label(lookAhead(0), type.toString())
         return null
     }
@@ -1112,7 +1115,7 @@ class Parser(
         if (check(type)) return next()
 
         cons.get(
-            error(bundle.format("diag.expect-token", type))
+            error(bundle.format("diag.miss-token", type))
                 .label(lookAhead(0), type.toString()),
         )
         return null
