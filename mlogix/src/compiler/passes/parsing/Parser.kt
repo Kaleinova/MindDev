@@ -798,6 +798,7 @@ class Parser(
             return Expr.Array(between(lBrace, prevToken), elements)
         }
 
+        error(bundle.get("diag.miss-expression")).label(lookAhead(0), "")
         return ErrorExpr(next().span)
     }
 
