@@ -142,7 +142,6 @@ abstract class Diagnostic(
                     )
                 )
             }
-            append("\n")
         }
     }
 
