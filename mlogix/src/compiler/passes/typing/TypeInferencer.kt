@@ -99,20 +99,20 @@ class TypeInferencer(val problems: DiagHandler) {
 
             is Stmt.ExprStmt -> {
                 val expr = inferExpr(stmt.expr)
-                for (c in expr.constraints) constraints.add(c)
+                constraints.addAll(expr.constraints)
             }
 
             is Stmt.IfStmt -> {
                 val cond = inferExpr(stmt.condition)
-                for (c in cond.constraints) constraints.add(c)
+                constraints.addAll(cond.constraints)
                 constraints.add(Constraint.Equal(cond.type, BuiltinType.Bool, stmt.condition.span))
                 analyzeStmt(stmt.thenBranch)
                 analyzeStmt(stmt.elseBranch)
             }
 
             is Stmt.MatchStmt -> {
-                val scr = inferExpr(stmt.scrutinee)
-                for (c in scr.constraints) constraints.add(c)
+                val scrutinee = inferExpr(stmt.scrutinee)
+                constraints.addAll(scrutinee.constraints)
                 stmt.branches?.let { brs ->
                     for ((_, _, body) in brs) {
                         analyzeStmt(body)
@@ -122,15 +122,15 @@ class TypeInferencer(val problems: DiagHandler) {
 
             is Stmt.ForStmt -> {
                 // flag 是循环标签，不是变量，不推断
-                stmt.varDecl?.let { val r = inferExpr(it); for (c in r.constraints) constraints.add(c) }
-                stmt.expr?.let { val r = inferExpr(it); for (c in r.constraints) constraints.add(c) }
+                stmt.varDecl?.let { val r = inferExpr(it); constraints.addAll(r.constraints) }
+                stmt.expr?.let { val r = inferExpr(it); constraints.addAll(r.constraints) }
                 analyzeStmt(stmt.body)
             }
 
             is Stmt.WhileStmt -> {
                 // flag 是循环标签，不推断
                 val cond = inferExpr(stmt.expr)
-                for (c in cond.constraints) constraints.add(c)
+                constraints.addAll(cond.constraints)
                 constraints.add(Constraint.Equal(cond.type, BuiltinType.Bool, stmt.expr.span))
                 analyzeStmt(stmt.body)
             }
@@ -145,7 +145,7 @@ class TypeInferencer(val problems: DiagHandler) {
 
             is Stmt.ReturnStmt -> {
                 val exprR = stmt.expr?.let { inferExpr(it) }
-                exprR?.let { for (c in it.constraints) constraints.add(c) }
+                exprR?.let {constraints.addAll(it.constraints) }
                 if (!returnContextStack.isEmpty) {
                     val context = returnContextStack.peek()
                     val returnType = exprR?.type ?: BuiltinType.Null
@@ -157,9 +157,9 @@ class TypeInferencer(val problems: DiagHandler) {
             is Stmt.AssignStmt -> {
                 // analyze both sides
                 val lr = inferExpr(stmt.`var`)
-                for (c in lr.constraints) constraints.add(c)
+                constraints.addAll(lr.constraints)
                 val valueR = inferExpr(stmt.value)
-                for (c in valueR.constraints) constraints.add(c)
+                constraints.addAll(valueR.constraints)
 
                 // if left side is a simple identifier, enforce/collect type constraints
                 val lhsIdent = unwrapIdentifier(stmt.`var`)
@@ -309,7 +309,7 @@ class TypeInferencer(val problems: DiagHandler) {
                 val elementTypes = Seq<Type>(0)
                 for (e in expr.elements) {
                     val r = inferExpr(e)
-                    for (c in r.constraints) combined.add(c)
+                    combined.addAll(r.constraints)
                     elementTypes.add(r.type)
                 }
                 InferResult(Type.TupleType(elementTypes), combined)
@@ -329,8 +329,8 @@ class TypeInferencer(val problems: DiagHandler) {
                 val l = inferExpr(expr.left)
                 val r = inferExpr(expr.right)
                 val combined = Seq<Constraint>(0)
-                for (c in l.constraints) combined.add(c)
-                for (c in r.constraints) combined.add(c)
+                combined.addAll(l.constraints)
+                combined.addAll(r.constraints)
 
                 val resultType = if (expr.operator.type in setOf(
                         TokenType.GREATER,
@@ -357,7 +357,7 @@ class TypeInferencer(val problems: DiagHandler) {
                 val elemVar = solver.freshVar()
                 for (e in expr.elements) {
                     val r = inferExpr(e)
-                    for (c in r.constraints) combined.add(c)
+                    combined.addAll(r.constraints)
                     // 使用方=元素实际类型，声明方=统一的元素类型变量
                     combined.add(Constraint.Equal(r.type, elemVar, e.span))
                 }
@@ -369,8 +369,8 @@ class TypeInferencer(val problems: DiagHandler) {
                 val l = inferExpr(expr.list)
                 val index = inferExpr(expr.index)
                 val combined = Seq<Constraint>(0)
-                for (c in l.constraints) combined.add(c)
-                for (c in index.constraints) combined.add(c)
+                combined.addAll(l.constraints)
+                combined.addAll(index.constraints)
                 val elemVar = solver.freshVar()
                 combined.add(Constraint.Equal(l.type, Type.Arr(elemVar), expr.list.span))
                 combined.add(Constraint.Equal(index.type, BuiltinType.Int, expr.index.span))
@@ -379,21 +379,21 @@ class TypeInferencer(val problems: DiagHandler) {
 
             is Expr.Range -> {
                 val combined = Seq<Constraint>(0)
-                expr.left?.let { for (c in inferExpr(it).constraints) combined.add(c) }
-                expr.right?.let { for (c in inferExpr(it).constraints) combined.add(c) }
+                expr.left?.let { combined.addAll(inferExpr(it).constraints) }
+                expr.right?.let { combined.addAll(inferExpr(it).constraints) }
                 InferResult(BuiltinType.Unknown, combined)
             }
 
             is Expr.Call -> {
                 val callee = inferExpr(expr.callee)
                 val combined = Seq<Constraint>(0)
-                for (c in callee.constraints) combined.add(c)
+                combined.addAll(callee.constraints)
 
                 // 实参类型：逐个推断
                 val argTypes = Seq<Type>(expr.args.size)
                 for (a in expr.args) {
                     val ar = inferExpr(a)
-                    for (c in ar.constraints) combined.add(c)
+                    combined.addAll(ar.constraints)
                     argTypes.add(ar.type)
                 }
 
