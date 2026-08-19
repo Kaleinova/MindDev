@@ -487,9 +487,12 @@ class Parser(
         var expr = expression()
         if (expr is Expr.Identifier) {
             expr = annotation(expr)
-        } else if (expr is ErrorExpr) {
-            recoverByTokenTree(TokenType.RECOVERY)
-            return null
+        }
+        if (expr is ErrorExpr) {
+            when(recoverByTokenTree(TokenType.RECOVERY)) {
+                in TokenType.ASSIGNS -> {}
+                else -> return null
+            }
         }
 
         val assignStmt = assignStmt(expr)
@@ -858,8 +861,9 @@ class Parser(
      */
     private fun annotation(subject: Expr): Expr {
         // id :
-        if (!isStmtEnd && match(TokenType.COLON)) {
-            val enums = anonymousEnum()
+        if (!isStmtEnd && check(TokenType.COLON)) {
+            val colon = next()
+            val enums = anonymousEnum() ?: return ErrorExpr(between(colon, prevToken))
 
             if (!enums.isEmpty) return Expr.Annotation(subject, enums)
             // 如果标注数量为0，视作Identifier
@@ -867,7 +871,7 @@ class Parser(
         return subject
     }
 
-    private fun anonymousEnum(): Seq<Expr> {
+    private fun anonymousEnum(): Seq<Expr>? {
         val enums = Seq<Expr>(3)
         // ?
         if (check(TokenType.QUESTION_MARK)) {
@@ -879,17 +883,26 @@ class Parser(
         }
 
         // tuple1 | tuple2 ...
+        var hasError = false
         while (!isAtEnd) {
             if (check(TokenType.LPAREN)) {
-                enums.add(tuple())
+                val tuple = tuple()
+                if (tuple is ErrorExpr) {
+                    hasError = true
+                } else if (!hasError) {
+                    enums.add(tuple())
+                }
             } else {
-                consume(TokenType.IDENTIFIER)?.let {
-                    enums.add(Expr.Identifier(it))
+                val id = consume(TokenType.IDENTIFIER)
+                if (id == null) {
+                    hasError = true
+                } else if (!hasError) {
+                    enums.add(Expr.Identifier(id))
                 }
             }
             if (!match(TokenType.OR)) break
         }
-
+        if(hasError) return null
         return enums
     }
 
@@ -898,9 +911,11 @@ class Parser(
      */
     private fun tuple(): Expr {
         val lParen = next()
+        var hasError = false
         val elements = seq(
             {
                 consume(TokenType.IDENTIFIER) {
+                    hasError = true
                     error(bundle.get("diag.miss-tuple-element"))
                         .label(lookAhead(0))
                 }?.let { Expr.Identifier(it) }
@@ -908,6 +923,7 @@ class Parser(
             EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
             { true },
             {
+                hasError = true
                 error(bundle.get("diag.miss-tuple-separator"))
                     .label(lookAhead(0))
                     .label(lParen, bundle.get("diag.tuple-start"))
@@ -921,7 +937,7 @@ class Parser(
             }
         )
 //         TODO style提示
-        if (elements.size == 1) return elements[0]
+        if (hasError) return ErrorExpr(between(lParen, prevToken))
         return Expr.Tuple(between(lParen, prevToken), elements)
     }
 
