@@ -83,6 +83,7 @@ class ParserTest {
                     Expr.Call(
                         span,
                         Expr.Identifier(token(TokenType.IDENTIFIER, "print")),
+                        null,
                         Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "i")))
                     )
                 )
@@ -157,7 +158,7 @@ class ParserTest {
             )
         )
 
-        val expectedFn = Stmt.FnStmt(span, name, Seq.with(aParam, bParam), results, body)
+        val expectedFn = Stmt.FnStmt(span, name, null, Seq.with(aParam, bParam), results, body)
         assertEquals(ast, expectedFn)
     }
 
@@ -165,7 +166,7 @@ class ParserTest {
     fun `parse function call`() {
         val ast = parser.parse("add(1, 2)")
         val call = Expr.Call(
-            span, Expr.Identifier(token(TokenType.IDENTIFIER, "add")), Seq.with(
+            span, Expr.Identifier(token(TokenType.IDENTIFIER, "add")), null, Seq.with(
                 Expr.Literal(token(TokenType.INT, 1.0)), Expr.Literal(token(TokenType.INT, 2.0))
             )
         )
