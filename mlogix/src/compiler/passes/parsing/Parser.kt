@@ -849,7 +849,12 @@ class Parser(
     private fun tuple(): Expr {
         val lParen = next()
         val elements = seq(
-            { expression() },
+            {
+                consume(TokenType.IDENTIFIER) {
+                    error(bundle.get("diag.miss-tuple-element"))
+                        .label(lookAhead(0))
+                }?.let { Expr.Identifier(it) }
+            },
             EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
             { true },
             {
