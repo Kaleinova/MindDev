@@ -226,7 +226,7 @@ class TypeInferencer(val problems: DiagHandler) {
 
         // 形参类型：无注解 → 类型变量；有注解 → 类型变量 + Equal(变量, 注解类型) 约束
         val paramTypes = Seq<Type>(8)
-        stmt.parameters?.let { params ->
+        stmt.params?.let { params ->
             for (p in params) {
                 val tv = solver.freshVar()
                 paramTypes.add(tv)
@@ -257,7 +257,7 @@ class TypeInferencer(val problems: DiagHandler) {
 
         // analyze body with parameters bound
         returnContextStack.add(ReturnContext(resultType, stmt.name?.span ?: stmt.span))
-        stmt.parameters?.let { params ->
+        stmt.params?.let { params ->
             for ((i, p) in params.withIndex()) {
                 val ident = unwrapIdentifier(p)
                 ident?.defId?.let { defId ->
@@ -392,8 +392,8 @@ class TypeInferencer(val problems: DiagHandler) {
                 for (c in callee.constraints) combined.add(c)
 
                 // 实参类型：逐个推断
-                val argTypes = Seq<Type>(expr.arguments.size)
-                for (a in expr.arguments) {
+                val argTypes = Seq<Type>(expr.args.size)
+                for (a in expr.args) {
                     val ar = inferExpr(a)
                     for (c in ar.constraints) combined.add(c)
                     argTypes.add(ar.type)
@@ -424,7 +424,7 @@ class TypeInferencer(val problems: DiagHandler) {
                         Constraint.Equal(
                             element,
                             paramVars[i],
-                            expr.arguments[i].span,
+                            expr.args[i].span,
                             declSpan,
                         )
                     )

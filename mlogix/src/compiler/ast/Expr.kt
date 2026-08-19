@@ -68,7 +68,8 @@ abstract class Expr(span: Spanned) : ASTNode(span.span()) {
     /**
      * 函数调用 func(...)
      */
-    data class Call(override val span: Span, val callee: Expr, val arguments: Seq<Expr>) : Expr(span)
+    data class Call(override val span: Span, val callee: Expr, val typeArgs: Seq<Expr>?, val args: Seq<Expr>) :
+        Expr(span)
 
     /**
      * 获取字段 type.field  type.func

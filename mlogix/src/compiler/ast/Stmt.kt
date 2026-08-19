@@ -1,10 +1,10 @@
 package mlogix.compiler.ast
 
 import arc.struct.Seq
-import mlogix.compiler.core.symbol.DefId
-import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
+import mlogix.compiler.core.symbol.DefId
+import mlogix.compiler.core.token.Token
 
 //Statement
 abstract class Stmt(span: Span) : ASTNode(span) {
@@ -64,7 +64,8 @@ abstract class Stmt(span: Span) : ASTNode(span) {
     data class FnStmt(
         override val span: Span,
         val name: Token?,
-        val parameters: Seq<Expr>?,
+        val typeParams: Seq<Expr>?,
+        val params: Seq<Expr>?,
         val results: Seq<Expr>?,
         val body: Stmt?
     ) : Stmt(span) {

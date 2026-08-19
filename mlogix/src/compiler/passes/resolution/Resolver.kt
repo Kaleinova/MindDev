@@ -156,7 +156,7 @@ class Resolver(private val problems: DiagHandler) {
 
         // 形参与函数体在子作用域中（未来泛型形参 `<T>` 也绑定在此，类型注解可引用）
         val fnScope = scope.child()
-        stmt.parameters?.let { params ->
+        stmt.params?.let { params ->
             for (p in params) bindParam(p, fnScope)
         }
 
@@ -262,7 +262,7 @@ class Resolver(private val problems: DiagHandler) {
 
             is Expr.Call -> {
                 resolveExpr(expr.callee, scope)
-                for (a in expr.arguments) resolveExpr(a, scope)
+                for (a in expr.args) resolveExpr(a, scope)
             }
 
             is Expr.Get -> {
@@ -337,7 +337,7 @@ class Resolver(private val problems: DiagHandler) {
 
             is Expr.Call -> {
                 resolveAnnotationNames(expr.callee, scope)
-                for (a in expr.arguments) resolveAnnotationNames(a, scope)
+                for (a in expr.args) resolveAnnotationNames(a, scope)
             }
 
             is Expr.Get -> {

@@ -312,26 +312,51 @@ class Parser(
     private fun fnStmt(): Stmt {
         val start = next()
 
-        val name = consume(TokenType.IDENTIFIER) { e -> e.label(start, bundle.get("diag.fn-requires-name")) }
-        val name = consume(TokenType.IDENTIFIER) { e -> e.label(start, bundle.get("diag.miss-fn-name")) }
-        val lParen: Token?
-        if (name == null) {
-            if (!check(TokenType.LPAREN)) {
-                return FnStmt(start.span, null, null, null, null)
-            }
-            lParen = next()
-        } else {
-            lParen = consume(TokenType.LPAREN) { e -> e.label(start, bundle.get("diag.miss-fn-params")) }
-            if (lParen == null) {
-                return FnStmt(between(start, name), name, null, null, null)
-            }
+        val name = consume(TokenType.IDENTIFIER) {
+            error(bundle.get("diag.miss-fn-name")).label(start)
         }
+
+        var typeParams: Seq<Expr>? = null
+        if (check(TokenType.LESS)) {
+            val lAngle = next()
+            var isSeparatorOptional = false
+            typeParams = seq(
+                {
+                    consume(TokenType.IDENTIFIER) {
+                        error(bundle.get("diag.miss-ident-as-type-param")).label(lookAhead(0))
+                    }?.let {
+                        val expr = annotation(Expr.Identifier(it))
+                        isSeparatorOptional = expr !is Expr.Annotation
+                        return@let expr
+                    }
+                },
+                EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
+                { isSeparatorOptional },
+                {
+                    error(bundle.get("diag.miss-type-param-separator"))
+                        .label(lookAhead(0))
+                        .label(lAngle, bundle.get("diag.type-param-start"))
+                },
+                TokenType.GREATER,
+                true,
+                {
+                    error(bundle.get("diag.miss-type-param-end"))
+                        .label(lookAhead(0))
+                        .label(lAngle, bundle.get("diag.param-start"))
+                }
+            )
+        }
+
+        if (!check(TokenType.LPAREN)) {
+            return FnStmt(start.span, name, typeParams, null, null, null)
+        }
+        val lParen = next()
 
         var isSeparatorOptional = false
         val parameters = seq(
             {
-                consume(TokenType.IDENTIFIER) { e ->
-                    e.label(lookAhead(0), bundle.get("diag.miss-ident-as-param"))
+                consume(TokenType.IDENTIFIER) {
+                    error(bundle.get("diag.miss-ident-as-param")).label(lookAhead(0))
                 }?.let {
                     val expr = annotation(Expr.Identifier(it))
                     isSeparatorOptional = expr !is Expr.Annotation
@@ -340,10 +365,18 @@ class Parser(
             },
             EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
             { isSeparatorOptional },
-            { error(bundle.get("diag.miss-param-separator")).label(lParen, bundle.get("diag.param-start")) },
+            {
+                error(bundle.get("diag.miss-param-separator"))
+                    .label(lookAhead(0))
+                    .label(lParen, bundle.get("diag.param-start"))
+            },
             TokenType.RPAREN,
             true,
-            { error(bundle.get("diag.miss-param-end")).label(lParen, bundle.get("diag.param-start")) }
+            {
+                error(bundle.get("diag.miss-param-end"))
+                    .label(lookAhead(0))
+                    .label(lParen, bundle.get("diag.param-start"))
+            }
         )
 
         val results = Seq<Expr>(3)
@@ -361,8 +394,8 @@ class Parser(
             results.add(
                 seq(
                     {
-                        consume(TokenType.IDENTIFIER) { e ->
-                            e.label(lookAhead(0), bundle.get("diag.miss-ident-as-result"))
+                        consume(TokenType.IDENTIFIER) {
+                            error(bundle.get("diag.miss-ident-as-result")).label(lookAhead(0))
                         }?.let {
                             val expr = annotation(Expr.Identifier(it))
                             isSeparatorOptional = expr !is Expr.Annotation
@@ -371,11 +404,15 @@ class Parser(
                     },
                     EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
                     { isSeparatorOptional },
-                    { error(bundle.get("diag.miss-result-separator")).label(arrow, bundle.get("diag.result-start")) },
+                    {
+                        error(bundle.get("diag.miss-result-separator"))
+                            .label(lookAhead(0))
+                            .label(arrow, bundle.get("diag.result-start"))
+                    },
                     TokenType.LBRACE,
                     false,
-                    { error(bundle.get("diag.miss-result-brace")).label(lParen, bundle.get("diag.param-start")) }
-                ))
+                )
+            )
             if (results.isEmpty) {
                 error(bundle.get("diag.miss-result-decl-after-arrow"))
                     .label(arrow, "")
@@ -384,9 +421,9 @@ class Parser(
 
         if (check(TokenType.LBRACE)) {
             val body = block()
-            return FnStmt(between(start, body), name, parameters, results, body)
+            return FnStmt(between(start, body), name, typeParams, parameters, results, body)
         } else {
-            return FnStmt(between(start, prevToken), name, parameters, results, null)
+            return FnStmt(between(start, prevToken), name, typeParams, parameters, results, null)
         }
     }
 
@@ -672,8 +709,9 @@ class Parser(
                     val lBracket = next()
 
                     val index = expression()
-                    val rBracket =
-                        consume(TokenType.RBRACKET) { e: Diagnostic -> e.label(lBracket, bundle.get("diag.index-error")) }
+                    val rBracket = consume(TokenType.RBRACKET) {
+                        error(bundle.get("diag.index-error")).label(lBracket)
+                    }
 
                     expr = if (rBracket != null) {
                         Expr.Index(between(lBracket, rBracket), expr, index)
@@ -686,23 +724,23 @@ class Parser(
                 check(TokenType.LPAREN) -> { // 函数调用
                     val lParen = next()
 
-                    val arguments = Seq<Expr>(8)
+                    val args = Seq<Expr>(8)
                     while (true) {
                         if (check(TokenType.RPAREN)) {
-                            expr = Expr.Call(between(expr, next()), expr, arguments)
+                            expr = Expr.Call(between(expr, next()), expr, null, args)
                             break
                         }
                         val innerExpr = expression()
                         if (innerExpr is ErrorExpr) {
-                            error(bundle.get("diag.miss-call-end")).apply{
+                            error(bundle.get("diag.miss-call-end")).apply {
                                 label(lParen, bundle.get("diag.arg-start"))
                                 help(bundle.get("miss-arg-end.help"))
                                     .insert(lookAhead(0), ")")
                             }
-                            expr = Expr.Call(between(expr, arguments.lastOrNull() ?: lParen), expr, arguments)
+                            expr = Expr.Call(between(expr, args.lastOrNull() ?: lParen), expr, null, args)
                             break
                         }
-                        arguments.add(innerExpr)
+                        args.add(innerExpr)
                         match(TokenType.COMMA) // 可选逗号
                     }
                     continue
@@ -712,8 +750,8 @@ class Parser(
                     val dot = next()
 
                     val id =
-                        consume(TokenType.IDENTIFIER) { e: Diagnostic ->
-                            e.label(dot, bundle.get("diag.get-error"))
+                        consume(TokenType.IDENTIFIER) {
+                            error(bundle.get("diag.get-error")).label(dot)
                         } ?: return expr
                     val field: Expr = Expr.Identifier(id)
 
@@ -744,15 +782,22 @@ class Parser(
                 { expression() },
                 EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
                 { true },
-                { error(bundle.get("diag.miss-array-separator")).label(lBrace, bundle.get("diag.array-start")) },
+                {
+                    error(bundle.get("diag.miss-array-separator"))
+                        .label(lookAhead(0))
+                        .label(lBrace, bundle.get("diag.array-start"))
+                },
                 TokenType.RBRACE,
                 true,
-                { error(bundle.get("diag.miss-array-end")).label(lBrace, bundle.get("diag.array-start")) }
+                {
+                    error(bundle.get("diag.miss-array-end"))
+                        .label(lookAhead(0))
+                        .label(lBrace, bundle.get("diag.array-start"))
+                }
             )
             return Expr.Array(between(lBrace, prevToken), elements)
         }
 
-        error(bundle.get("diag.miss-expression")).label(lookAhead(0), "")
         return ErrorExpr(next().span)
     }
 
@@ -807,10 +852,18 @@ class Parser(
             { expression() },
             EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
             { true },
-            { error(bundle.get("diag.miss-tuple-separator")).label(lParen, bundle.get("diag.tuple-start")) },
+            {
+                error(bundle.get("diag.miss-tuple-separator"))
+                    .label(lookAhead(0))
+                    .label(lParen, bundle.get("diag.tuple-start"))
+            },
             TokenType.RPAREN,
             true,
-            { error(bundle.get("diag.miss-tuple-end")).label(lParen, bundle.get("diag.tuple-start")) }
+            {
+                error(bundle.get("diag.miss-tuple-end"))
+                    .label(lookAhead(0))
+                    .label(lParen, bundle.get("diag.tuple-start"))
+            }
         )
 //         TODO style提示
         if (elements.size == 1) return elements[0]
@@ -822,19 +875,19 @@ class Parser(
      * @param elementProv 解析并返回一个序列元素，无法解析时请返回[ErrorExpr]/`null`以调用恢复，务必消耗元素，否则死循环
      * @param separators 分隔符，方法内已有自带的分隔符[matchStmtEnd]，可填`setOf()`以作空格
      * @param isSeparatorOptional 是否允许省略分隔符
-     * @param missSeparator 当`expect(end)`失败时使用missSeparator报错，方法自动调用[Diagnostic.label]
+     * @param missSeparator 当`expect(end)`失败时使用missSeparator报错
      * @param end 序列结束标志
      * @param consumeEnd 是否消耗[end]，`false`时不强求[end]出现
-     * @param missEnd 错误恢复到EOF时调用，[consumeEnd]为`false`时不使用，方法自动调用[Diagnostic.label]
+     * @param missEnd 错误恢复到EOF时调用，[consumeEnd]为`false`时不使用
      */
     private fun seq(
         elementProv: Prov<Expr?>,
         separators: EnumSet<TokenType>,
         isSeparatorOptional: Boolp,
-        missSeparator: Prov<Diagnostic>,
+        missSeparator: () -> Unit,
         end: TokenType,
         consumeEnd: Boolean,
-        missEnd: Prov<Diagnostic>? = null,
+        missEnd: () -> Unit = {},
     ): Seq<Expr> {
         val seq = Seq<Expr>()
         while (!check(end)) {
@@ -855,18 +908,14 @@ class Parser(
                 // 没有检查到正确分隔符，应该有结束符
                 if (check(end)) break
                 // 没有结束符，可能是漏掉了分隔符，报错并恢复
-                if (!isAtEnd) {
-                    missSeparator.get().label(lookAhead(0), "")
-                }
+                if (!isAtEnd) missSeparator()
             }
             // 解析失败，开始恢复
             when (val type = recoverByTokenTree(separators + end)) {
                 end -> break
 
                 TokenType.EOF -> {
-                    if (consumeEnd) {
-                        missEnd?.get()?.label(lookAhead(0), "")
-                    }
+                    if (consumeEnd) missEnd()
                     return seq
                 }
 
@@ -1111,43 +1160,22 @@ class Parser(
     /**
      * 若下一个token不是指定类型的则报告错误并返回null，否则返回该token并推进
      */
-    private fun consume(type: TokenType, cons: Cons<Diagnostic>): Token? {
+    private fun consume(type: TokenType, action: () -> Unit): Token? {
         if (check(type)) return next()
-
-        cons.get(
-            error(bundle.format("diag.miss-token", type))
-                .label(lookAhead(0), type.toString()),
-        )
+        action()
         return null
     }
 
-    //    private Res<Token> consume(Set<TokenType> types) {
-    //        if(check(types)) return new Ok<> (next());
-    //        StringBuilder sbd = new StringBuilder();
-    //        for(TokenType type : types) {
-    //            sbd.append(type.toString()).append(" ");
-    //        }
-    //        return new Err<>(error("期望TokenType")
-    //                .label(lookAhead(), sbd.toString())
-    //        );
-    //    }
-    //
-    //    private Res<Token> consume(TokenType type, Runnable r) {
-    //        if(check(type)) return new Ok<>(next());
-    //        Diagnostic.ParserDiag e = (Diagnostic.ParserDiag) error("期望字符").label(lookAhead(), type.toString());
-    //        r.run();
-    //        return new Err<>(e);
-    //    }
     // ---------- 错误恢复方法 ----------
 
     /**
      * 错误恢复，扫描直到期望的TokenType，但不会消耗，按照Token树解析，不考虑已闭合的定界符
      */
-    private fun recoverByTokenTree(expected: Set<TokenType>, addition: TokenType? = null): TokenType {
+    private fun recoverByTokenTree(expected: Set<TokenType>): TokenType {
         val delimiters = Seq<TokenType>()
         while (true) {
             val type = lookAhead(0).type
-            if (delimiters.isEmpty && (expected.contains(type) || addition == type)) return type
+            if (delimiters.isEmpty && (expected.contains(type))) return type
             when (type) {
                 TokenType.EOF -> return TokenType.EOF
 
@@ -1193,14 +1221,12 @@ class Parser(
         return Snapshot(
             input.deepCopy(),
             lexer.createSnapshot(),
-            problems.createSnapshot()
         )
     }
 
     private fun restoreSnapshot(snapshot: Snapshot) {
         input = snapshot.inputSnapshot
         lexer.restoreSnapshot(snapshot.lexerSnapshot)
-        problems.restoreSnapshot(snapshot.problemsSnapshot)
     }
 
     // ---------- 类生成方法 ----------
@@ -1303,6 +1329,5 @@ class Parser(
     private data class Snapshot(
         val inputSnapshot: InputWindow,
         val lexerSnapshot: Lexer.LexerSnapshot,
-        val problemsSnapshot: DiagHandler.DiagCollectorSnapshot
     )
 }
