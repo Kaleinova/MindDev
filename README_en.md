@@ -22,10 +22,10 @@ Read this when you need to build manually rather than using a release version.
 
 ### Test MLogiX Compiler
 
-- Basic test: run `./gradlew test`
+- Basic test: run `./gradlew mlogix:test`
 - Test specific source code:
    1. Create the file `test.mlx` under the `mlogix` module and write your test source code in it.
-   2. Run `./gradlew compile` or `./gradlew compile-debug`
+   2. Run `./gradlew mlogix:compile` or `./gradlew mlogix:compile-debug`
 
 ### Desktop Test Build (PC only)
 
