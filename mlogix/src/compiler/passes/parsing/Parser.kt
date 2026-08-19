@@ -525,7 +525,7 @@ class Parser(
      * @param expr `=`或复合赋值运算符前的表达式
      * @return 没有`=`或者复合赋值运算符时返回null;有时返回AssignStmt并推进
      */
-    private fun assignStmt(expr: Expr): Stmt? {
+    private fun assignStmt(expr: Expr): AssignStmt? {
         if (isStmtEnd) {
             if (check(TokenType.ASSIGNS)) {
                 error(bundle.get("diag.assign-missing-lhs"))
@@ -554,15 +554,13 @@ class Parser(
                 recoverByTokenTree(TokenType.RECOVERY)
                 return null
             }
-            val assign = Token(operator.span, TokenType.ASSIGN)
-            val subOperator = subOperatorOf(operator)
             val right = expression()
             if (right is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return AssignStmt(
                 between(expr, right),
                 expr,
-                assign,
-                Expr.Binary(expr, subOperator, right)
+                operator,
+                right
             )
         }
         return null

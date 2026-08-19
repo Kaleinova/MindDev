@@ -165,11 +165,7 @@ class TypeInferencer(val problems: DiagHandler) {
                 val lhsIdent = unwrapIdentifier(stmt.`var`)
                 if (lhsIdent != null) {
                     val defId = lhsIdent.defId
-                    if (defId == null) {
-                        val lhsName = (lhsIdent.token.literal as? String) ?: lhsIdent.token.type.toString()
-                        error(bundle.format("diag.undeclared-variable", lhsName))
-                            .label(lhsIdent, bundle.get("diag.undeclared-variable.help"))
-                    } else {
+                    if (defId != null) {
                         val symbol = symbolTable.get(defId)
                         if (symbol != null) {
                             // derive a left-side type; if unknown, create a fresh type variable
@@ -183,13 +179,15 @@ class TypeInferencer(val problems: DiagHandler) {
                         }
                     }
                 }
-                // non-identifier LHS (e.g. indexing, field access): subexpressions already analyzed above.
+                // TODO non-identifier LHS (e.g. indexing, field access): subexpressions already analyzed above.
             }
 
             is Stmt.SetVarStmt -> {
                 // set introduces a new variable in current scope; its symbol was created by Resolver
-                val valueType =
-                    if (stmt.assignStmt != null) analyzeExpr((stmt.assignStmt as Stmt.AssignStmt).value) else BuiltinType.Unknown
+                val valueType = if (stmt.assignStmt != null)
+                    analyzeExpr(stmt.assignStmt.value)
+                else BuiltinType.Unknown
+
                 val varIdent = unwrapIdentifier(stmt.`var`)
                 varIdent?.defId?.let { defId ->
                     val symbol = symbolTable.get(defId)
@@ -287,7 +285,7 @@ class TypeInferencer(val problems: DiagHandler) {
                 val defId = expr.defId
                 if (defId == null) {
                     // Resolver 已报 diag.undeclared-identifier（名称解析归它管），
-                    // 这里静默降级为 Unknown，避免同一错误重复上报。
+                    // 这里静默降级为 Error，避免同一错误重复上报。
                     InferResult(BuiltinType.Error, Seq(0))
                 } else {
                     val symbol = symbolTable.get(defId)
