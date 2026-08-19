@@ -530,6 +530,7 @@ class Parser(
             val assign = Token(operator.span, TokenType.ASSIGN)
             val subOperator = subOperatorOf(operator)
             val right = expression()
+            if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return AssignStmt(
                 between(expr, right),
                 expr,
