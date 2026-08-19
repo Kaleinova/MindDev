@@ -68,18 +68,6 @@ dependencies {
     implementation(project(":mlogix"))
 }
 
-tasks.withType<KotlinCompile>().configureEach {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_1_8)
-    }
-}
-
-tasks.withType<JavaCompile>().configureEach {
-    sourceCompatibility = "1.8"
-    targetCompatibility = "1.8"
-    options.release.set(8)
-}
-
 // 定义输出目录（在 build 下）
 val mergedBundlesRoot = project.layout.buildDirectory.dir("mergedBundles").get()
 
