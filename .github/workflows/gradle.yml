@@ -16,6 +16,8 @@ jobs:
       with:
         java-version: 17
         distribution: 'temurin'
+    - name: Test MLogiX
+      run: ./gradlew mlogix:test
     - name: Build mod jar
       run: ./gradlew deploy
     - name: Upload built jar file
