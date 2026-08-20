@@ -890,7 +890,7 @@ class Parser(
                 if (tuple is ErrorExpr) {
                     hasError = true
                 } else if (!hasError) {
-                    enums.add(tuple())
+                    enums.add(tuple)
                 }
             } else {
                 val id = consume(TokenType.IDENTIFIER)
