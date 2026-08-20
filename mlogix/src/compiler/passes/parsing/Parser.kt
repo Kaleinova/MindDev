@@ -489,8 +489,9 @@ class Parser(
             expr = annotation(expr)
         }
         if (expr is ErrorExpr) {
-            when(recoverByTokenTree(TokenType.RECOVERY)) {
+            when (recoverByTokenTree(TokenType.RECOVERY)) {
                 in TokenType.ASSIGNS -> {}
+
                 else -> return null
             }
         }
@@ -817,9 +818,6 @@ class Parser(
         if (check(TokenType.LITERALS)) {
             return Expr.Literal(next())
 
-        } else if (check(TokenType.IDENTIFIER)) {
-            return Expr.Identifier(next())
-
         } else if (check(TokenType.LPAREN)) {
             val lParen = next()
             val expr = expression()
@@ -850,8 +848,78 @@ class Parser(
             return Expr.Array(between(lBrace, prevToken), elements)
         }
 
+        return identifier()
+    }
+
+    private fun identifier(): Expr {
+        if (check(TokenType.IDENTIFIER)) {
+            val id = next()
+            val snapshot = createSnapshotWithDiagHandler()
+            val result = typeArgs()
+            if (result == null) {
+                restoreSnapshot(snapshot)
+            } else {
+                if (result.remaining != 0) {
+                    error(bundle.get("diag.redundant-gt"))
+                        .label(prevToken.span.cutLast(result.remaining))
+                }
+                if (result.args.size != 0) {
+                    return Expr.Identifier(id, result.args)
+                }
+            }
+            return Expr.Identifier(id)
+        }
         error(bundle.get("diag.miss-expression")).label(lookAhead(0), "")
         return ErrorExpr(next().span)
+    }
+
+    private data class TypeArgsResult(val args: Seq<Expr.Identifier>, val remaining: Int)
+
+    private fun typeArgs(): TypeArgsResult? {
+        if (match(TokenType.LESS)) {
+            val args = Seq<Expr.Identifier>(2)
+            var remaining = 0
+            while (true) {
+                if (isAtEnd) {
+                    return null
+                }
+                if (remaining != 0) {
+                    remaining--
+                    return TypeArgsResult(args, remaining)
+                }
+                when {
+                    match(TokenType.GREATER) ->
+                        return TypeArgsResult(args, remaining)
+
+                    match(TokenType.SAR) -> {
+                        // >> 用掉一个剩一个
+                        remaining += 1
+                        return TypeArgsResult(args, remaining)
+                    }
+
+                    match(TokenType.SHR) -> {
+                        // >>> 用掉一个剩两个
+                        remaining += 2
+                        return TypeArgsResult(args, remaining)
+                    }
+                }
+                if (check(TokenType.IDENTIFIER)) {
+                    val id = next()
+                    val subArgs = typeArgs()
+                    if (subArgs != null) {
+                        if (subArgs.args.size == 0) {
+                            args.add(Expr.Identifier(id))
+                        } else {
+                            args.add(Expr.Identifier(id, subArgs.args))
+                        }
+                        remaining += subArgs.remaining
+                        continue
+                    }
+                }
+                return null
+            }
+        }
+        return TypeArgsResult(Seq(0), 0)
     }
 
     /**
@@ -893,16 +961,16 @@ class Parser(
                     enums.add(tuple)
                 }
             } else {
-                val id = consume(TokenType.IDENTIFIER)
-                if (id == null) {
+                val id = identifier()
+                if (id is ErrorExpr) {
                     hasError = true
                 } else if (!hasError) {
-                    enums.add(Expr.Identifier(id))
+                    enums.add(id)
                 }
             }
             if (!match(TokenType.OR)) break
         }
-        if(hasError) return null
+        if (hasError) return null
         return enums
     }
 
@@ -913,13 +981,7 @@ class Parser(
         val lParen = next()
         var hasError = false
         val elements = seq(
-            {
-                consume(TokenType.IDENTIFIER) {
-                    hasError = true
-                    error(bundle.get("diag.miss-tuple-element"))
-                        .label(lookAhead(0))
-                }?.let { Expr.Identifier(it) }
-            },
+            { identifier() },
             EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
             { true },
             {

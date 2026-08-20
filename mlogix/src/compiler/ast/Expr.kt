@@ -16,7 +16,7 @@ abstract class Expr(span: Spanned) : ASTNode(span.span()) {
     /**
      * 标识符
      */
-    data class Identifier(val token: Token) : Expr(token) {
+    data class Identifier(val token: Token, val typeArgs: Seq<Identifier>? = null) : Expr(token) {
         /**
          * 由 Resolver 填充：此标识符解析到的定义句柄。
          * 未声明（解析失败）时为 null。注意：不参与 data class 的 equals/hashCode。

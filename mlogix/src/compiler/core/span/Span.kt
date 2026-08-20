@@ -53,6 +53,12 @@ class Span : Spanned {
         return start() + len()
     }
 
+    /** 截取末尾部分 */
+    fun cutLast(len: Int): Span {
+        if (len > len()) return this
+        return Span(index(), end() - len, len)
+    }
+
     override fun toString(): String = "Span{${index()},${start()},${len()}}"
 
     /**
