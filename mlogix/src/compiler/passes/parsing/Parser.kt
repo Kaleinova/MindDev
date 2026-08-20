@@ -990,7 +990,10 @@ class Parser(
                     return seq
                 }
 
-                else -> if (separators.contains(type)) continue else kotlin.error("Unreachable")
+                else -> if (separators.contains(type)) {
+                    next()
+                    continue
+                } else kotlin.error("Unreachable")
             }
         }
         if (consumeEnd) next()
