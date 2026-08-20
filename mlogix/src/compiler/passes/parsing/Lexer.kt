@@ -461,7 +461,7 @@ class Lexer(private val problems: DiagHandler) {
             val builder = StringBuilder()
             builder.append(peek(-1))
 
-            while (!this.isAtEnd && peek() == '_') advance() //防止normalNumber报错
+            while (!this.isAtEnd && peek() == '_') advance() //防止numberFragment报错
 
             numberFragment(builder)
 
@@ -498,13 +498,14 @@ class Lexer(private val problems: DiagHandler) {
     private fun numberFragment(builder: StringBuilder) {
         if (this.isAtEnd) return
         val c = peek()
-        if (c == '_') {
+        if (peek() == '_') {
             error(bundle.get("diag.invalid-num-separator"))
                 .label(span(current, current + 1), Integer.toHexString(c.code))
             advance()
         }
 
         while (!this.isAtEnd) {
+            val c = peek()
             if (isDigit(c)) {
                 builder.append(c)
             } else if (c == '_') {
