@@ -16,11 +16,11 @@ class DiagHandler(
     val errors = Seq<Diagnostic>()
     val warnings = Seq<Diagnostic>()
 
-    fun createSnapshot(): DiagCollectorSnapshot {
-        return DiagCollectorSnapshot(errorNum(), warningNum())
+    fun createSnapshot(): DiagsSnapshot {
+        return DiagsSnapshot(errorNum(), warningNum())
     }
 
-    fun restoreSnapshot(snapshot: DiagCollectorSnapshot) {
+    fun restoreSnapshot(snapshot: DiagsSnapshot) {
         // 左闭右闭
         if (snapshot.errorNum != errorNum()) {
             errors.removeRange(snapshot.errorNum, errorNum() - 1)
@@ -63,5 +63,5 @@ class DiagHandler(
         warnings.clear()
     }
 
-    data class DiagCollectorSnapshot(val errorNum: Int, val warningNum: Int)
+    data class DiagsSnapshot(val errorNum: Int, val warningNum: Int)
 }

@@ -26,7 +26,7 @@ import java.util.*
  */
 class Parser(
     private val lexer: Lexer,
-    private val problems: DiagHandler,
+    private val diagHandler: DiagHandler,
 ) {
     private lateinit var sourceFile: SourceFile
     private lateinit var input: InputWindow
@@ -48,7 +48,7 @@ class Parser(
      * 运行前会重置problemCollector
      */
     fun parse(source: String): Stmt {
-        problems.clear()
+        diagHandler.clear()
 
         sourceFile = SourceFile(source)
         lexer.reset(sourceFile)
@@ -1295,9 +1295,18 @@ class Parser(
         )
     }
 
+    private fun createSnapshotWithDiagHandler(): Snapshot {
+        return Snapshot(
+            input.deepCopy(),
+            lexer.createSnapshot(),
+            diagHandler.createSnapshot(),
+        )
+    }
+
     private fun restoreSnapshot(snapshot: Snapshot) {
         input = snapshot.inputSnapshot
         lexer.restoreSnapshot(snapshot.lexerSnapshot)
+        snapshot.diagsSnapshot?.let { diagHandler.restoreSnapshot(it) }
     }
 
     // ---------- 类生成方法 ----------
@@ -1338,13 +1347,13 @@ class Parser(
 
     private fun error(text: String): ParserDiag {
         val e = ParserDiag(text, Diagnostic.DiagLevel.ERROR)
-        problems.addError(e)
+        diagHandler.addError(e)
         return e
     }
 
     private fun warning(text: String): ParserDiag {
         val w = ParserDiag(text, Diagnostic.DiagLevel.WARNING)
-        problems.addWarning(w)
+        diagHandler.addWarning(w)
         return w
     }
 
@@ -1400,5 +1409,7 @@ class Parser(
     private data class Snapshot(
         val inputSnapshot: InputWindow,
         val lexerSnapshot: Lexer.LexerSnapshot,
+        /** null表示不进行快照，恢复时不恢复diags */
+        val diagsSnapshot: DiagHandler.DiagsSnapshot? = null,
     )
 }
