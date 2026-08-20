@@ -60,11 +60,12 @@ class Compiler(projectPath: Fi) {
                 timer.endPhase()
 
                 // ---------- 输出报告 ----------
-                problems.printError()
-                problems.printWarning()
                 if (Log.isAllowed(Log.LogType.DEBUG)) {
                     ASTPrinter.print(result.ast, sourceFile)
+                    println()
                 }
+                problems.printError()
+                problems.printWarning()
             }
 
         } catch (e: IOException) {
