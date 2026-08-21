@@ -24,7 +24,7 @@ import java.io.IOException
 
 class Compiler(projectPath: Fi) {
     private val manager: SourceMap = SourceMap(projectPath)
-    private val problems: DiagHandler = DiagHandler(manager)
+    private val diagHandler: DiagHandler = DiagHandler(manager)
     private val config: CompilerConfig = CompilerConfig()
 
     fun compile(): Boolean {
@@ -33,9 +33,9 @@ class Compiler(projectPath: Fi) {
         // 构建编译管道（词法+语法 -> 名称解析 -> 类型推断；未来在此追加 Desugar / Dataflow / Exhaustiveness 等 Pass）
         val pipeline = CompilationPipeline(
             Seq.with(
-                ParsingPass(Parser(Lexer(problems), problems)),
-                ResolutionPass(Resolver(problems)),
-                TypeInferencePass(TypeInferencer(problems)),
+                ParsingPass(Parser(Lexer(diagHandler), diagHandler)),
+                ResolutionPass(Resolver(diagHandler)),
+                TypeInferencePass(TypeInferencer(diagHandler)),
             )
         )
 
@@ -55,7 +55,7 @@ class Compiler(projectPath: Fi) {
 
                 // ---------- 编译管道（词法+语法分析 + 名称解析 + 类型推断等 Pass） ----------
                 timer.startPhase("编译管道")
-                val context = CompilationContext(problems, sourceFile, config)
+                val context = CompilationContext(diagHandler, sourceFile, config)
                 val result = pipeline.run(sourceFile, context) as ResolutionResult
                 timer.endPhase()
 
@@ -64,8 +64,8 @@ class Compiler(projectPath: Fi) {
                     ASTPrinter.print(result.ast, sourceFile)
                     println()
                 }
-                problems.printError()
-                problems.printWarning()
+                diagHandler.printError()
+                diagHandler.printWarning()
             }
 
         } catch (e: IOException) {
@@ -74,13 +74,13 @@ class Compiler(projectPath: Fi) {
 
         timer.printPhaseTimes()
 
-        if (problems.errorNum() != 0) {
-            Log.info(problems.errorNum().toString() + " errors")
+        if (diagHandler.errorNum() != 0) {
+            Log.info(diagHandler.errorNum().toString() + " errors")
         }
-        if (problems.warningNum() != 0) {
-            Log.info(problems.warningNum().toString() + " warnings")
+        if (diagHandler.warningNum() != 0) {
+            Log.info(diagHandler.warningNum().toString() + " warnings")
         }
-        if (problems.hasError()) {
+        if (diagHandler.hasError()) {
             Log.info("编译失败")
             return false
         } else {
