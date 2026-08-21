@@ -56,8 +56,28 @@ class TypeScheme(
      * @see substitute 本方法依赖的底层替换逻辑
      */
     fun instantiate(freshVar: () -> Type.Var): Type {
-        val subsTable = ObjectMap<Int, Type.Var>()
+        val subsTable = ObjectMap<Int, Type>()
         for ((index) in typeVars) subsTable.put(index, freshVar())
+        return substitute(body, subsTable)
+    }
+
+    /**
+     * 按显式类型实参实例化：`typeVars[i]` 替换为 [args] 中第 i 个类型（如调用 `foo<Int, Array<Str>>`）。
+     *
+     * 数量规则（由调用方保证）：
+     * - [args] 数量等于声明的类型参数数量 → 全部按序替换；
+     * - 数量不足（或为空）→ 缺位的类型参数用 [freshVar] 生成新变量（支持推断补全，
+     *   也用于数量不一致报错后的"回退为全推断"）；
+     * - 数量超过 → 多余的实参被忽略（调用方应先报 [mlogix.util.I18N] 诊断）。
+     *
+     * @param args 显式类型实参（已转换为 [Type]），可为空
+     * @param freshVar 为缺位类型参数生成新变量的工厂（由 [mlogix.compiler.passes.typing.TypeSolver] 提供）
+     */
+    fun instantiateWith(args: Seq<Type>, freshVar: () -> Type.Var): Type {
+        val subsTable = ObjectMap<Int, Type>()
+        for ((i, v) in typeVars.withIndex()) {
+            subsTable.put(v.index, if (i < args.size) args.get(i) else freshVar())
+        }
         return substitute(body, subsTable)
     }
 
@@ -158,7 +178,7 @@ class TypeScheme(
      * @param subsTable 替换映射表，键为 `Int`（旧类型变量的索引），值为 `Type.Var`（新类型变量）
      * @return 完全替换后的新类型（如果替换映射未命中，则返回原类型对象的引用以节省内存）
      */
-    private fun substitute(type: Type, subsTable: ObjectMap<Int, Type.Var>): Type {
+    private fun substitute(type: Type, subsTable: ObjectMap<Int, Type>): Type {
         return when (type) {
             is Type.Var -> subsTable.get(type.index) ?: type
             is Type.Con -> type
@@ -169,6 +189,11 @@ class TypeScheme(
             }
 
             is Type.Arr -> Type.Arr(substitute(type.element, subsTable))
+
+            is Type.App -> {
+                val args = type.args.map { substitute(it, subsTable) }
+                Type.App(type.con, args)
+            }
 
             is Type.TupleType -> {
                 val elements = type.elements.map { substitute(it, subsTable) }

@@ -5,10 +5,11 @@ import arc.struct.ObjectMap
 import arc.struct.Seq
 import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
+import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeVisitor
-import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.DiagHandler
+import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.util.I18N.bundle
 
 /**
@@ -73,6 +74,11 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
 
             is Type.Arr -> Type.Arr(walk(t.element))
 
+            is Type.App -> {
+                val args = t.args.map { walk(it) }
+                Type.App(t.con, args)
+            }
+
             is Type.TupleType -> {
                 val elements = t.elements.map { walk(it) }
                 Type.TupleType(elements)
@@ -134,6 +140,31 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
 
             t1 is Type.Arr && t2 is Type.Arr -> unify(t1.element, t2.element, pos, declPos)
 
+            // 泛型类型应用 `con<args...>`：构造器必须同名，实参数量必须一致，随后逐元素合一。
+            // 支持嵌套泛型（`Array<Array<T>>` 与 `Array<Array<Int>>` 的合一）。
+            t1 is Type.App && t2 is Type.App -> {
+                if (t1.con != t2.con) {
+                    reportMismatch(t1, t2, pos, declPos)
+                    return
+                }
+                if (t1.args.size != t2.args.size) {
+                    report(
+                        bundle.format("diag.type-arg-count", t1.con.name, t1.args.size, t2.args.size),
+                        pos,
+                        declPos
+                    )
+                    return
+                }
+                for ((i, element) in t1.args.withIndex()) {
+                    unify(element, t2.args.get(i), pos, declPos)
+                }
+            }
+
+            // `Type.Arr` 是 `App(Con("Array"), [element])` 的语法糖（数组字面量推断产物是 Arr，
+            // 注解/类型实参是 App），二者合一互相兼容。
+            t1 is Type.Arr && t2 is Type.App -> unifyArrApp(t1, t2, pos, declPos)
+            t1 is Type.App && t2 is Type.Arr -> unifyArrApp(t2, t1, pos, declPos)
+
             t1 is Type.TupleType && t2 is Type.TupleType -> {
                 if (t1.elements.size != t2.elements.size) {
                     report(bundle.format("diag.tuple-count-mismatch", t1.elements.size, t2.elements.size), pos, declPos)
@@ -149,6 +180,22 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
 
             t1 != t2 -> reportMismatch(t1, t2, pos, declPos)
         }
+    }
+
+    /**
+     * `Arr` 与 `App` 的兼容合一：`Type.Arr(element)` ≡ `Type.App(Con("Array"), [element])`。
+     * 非 Array 构造器或实参数量不是 1 时报错。
+     */
+    private fun unifyArrApp(arr: Type.Arr, app: Type.App, pos: Span?, declPos: Span?) {
+        if (app.con != BuiltinType.Array) {
+            reportMismatch(arr, app, pos, declPos)
+            return
+        }
+        if (app.args.size != 1) {
+            report(bundle.format("diag.type-arg-count", BuiltinType.Array.name, 1, app.args.size), pos, declPos)
+            return
+        }
+        unify(arr.element, app.args.get(0), pos, declPos)
     }
 
     /**

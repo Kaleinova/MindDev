@@ -15,6 +15,17 @@ Quick start (Windows / PowerShell)
     - Run a single test class: .\gradlew.bat test --tests "mlogix.compiler.LexerTest"
 - JAR output: build/libs/MLogiX.jar (Gradle produces this artifact)
 
+File encoding (文件编码) — 必须遵守
+
+- 所有源码/测试/资源文件一律 **UTF-8 无 BOM**。含中文注释的 Kotlin/Java/`.properties` 文件尤其敏感。
+- **绝不用 PowerShell(版本 < 6.0) 重写含中文的源文件。**版本低于6.0的 Windows PowerShell**，其 `Get-Content` / `Set-Content`
+  在未显式指定编码时使用 **ANSI（中文系统即 GBK）**。对 UTF-8 文件做一次读/写就会**有损重编码**：多数字节因 GBK
+  双向映射幸存，但无法配对成 GBK 的字节会被替换成 `?`（0x3F），文件不再是合法 UTF-8 → IDEA 打开时报
+  "该文件以错误的编码加载: 'UTF-8'"，中文注释变乱码，且**不可自动无损还原**。
+- 使用Power Shell前先检查Power Shell版本，版本不满足 >= 6.0时必须遵守铁律：
+  若确需用 PowerShell 处理文件，读写都显式加 `-Encoding UTF8`（读：`Get-Content -Encoding UTF8`，
+  写：`Set-Content -Encoding UTF8`）。
+
 Big picture architecture
 
 - This repo is a small language front-end (lexer → parser → AST → semantic analysis → problem reporting).

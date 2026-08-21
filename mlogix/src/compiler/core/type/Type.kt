@@ -31,6 +31,18 @@ sealed class Type {
     /** 元组类型 `(T1, T2, ...)` */
     data class TupleType(val elements: Seq<Type>) : Type()
 
+    /**
+     * 泛型类型应用 `con<args...>`（如 `Array<Int>`、`Array<Array<T>>`；
+     * 未来的用户定义泛型类型同样落在这里）。
+     *
+     * 说明：
+     * - [Arr] 是 `App(Con("Array"), [element])` 的语法糖——数组字面量推断产出的仍是 [Arr]，
+     *   合一（[mlogix.compiler.passes.typing.TypeSolver]）中两者互相兼容；
+     * - 与 [Func] 一样，`args` 为 [Seq]，结构相等只比较 [con]（具名构造类型），
+     *   参数逐元素合一，不依赖 Seq 的值相等。
+     */
+    data class App(val con: Type.Con, val args: Seq<Type>) : Type()
+
     /** 未定类型：尚未被约束（允许再次推断） */
     data object Unknown : Type()
 
@@ -52,6 +64,7 @@ sealed class Type {
         is Var -> "Var($index)"
         is Func -> "(${params.joinToString(", ") { it.pretty() }}) -> ${result.pretty()}"
         is Arr -> "Array<${element.pretty()}>"
+        is App -> "${con.name}<${args.joinToString(", ") { it.pretty() }}>"
         is TupleType -> "(${elements.joinToString(", ") { it.pretty() }})"
         Unknown -> "Unknown"
         Error -> "Error"

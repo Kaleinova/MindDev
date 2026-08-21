@@ -150,12 +150,15 @@ class Resolver(private val problems: DiagHandler) {
         val fnSymbol = declare(fnName, BuiltinType.Fn, stmt.name?.span ?: stmt.span, scope)
         stmt.defId = fnSymbol?.id
 
-        // 挂载 TypeScheme：当前无泛型语法，typeVars 为空。
-        // 未来 `fn foo<T>(...)` 就绪后，在此把泛型形参填入 TypeScheme.typeVars。
+        // 类型方案（含泛型参数）由 TypeInferencer 构建——它持有求解器，能分配类型变量；
+        // 这里只挂一个占位，避免 null（见 analyzeFnStmt）
         fnSymbol?.typeScheme = TypeScheme(Seq(), BuiltinType.Fn)
 
-        // 形参与函数体在子作用域中（未来泛型形参 `<T>` 也绑定在此，类型注解可引用）
+        // 形参与函数体在子作用域中；泛型形参（`fn foo<T, E>`）先绑定，类型注解才能引用
         val fnScope = scope.child()
+        stmt.typeParams?.let { typeParams ->
+            for (typeParam in typeParams) resolveTypeParam(typeParam, fnScope)
+        }
         stmt.params?.let { params ->
             for (p in params) bindParam(p, fnScope)
         }
@@ -173,8 +176,28 @@ class Resolver(private val problems: DiagHandler) {
     }
 
     /**
-     * 形参绑定：形参可能是 `Identifier` 或 `Annotation(Identifier, 注解...)`。
-     * 绑定名称 → DefId，并把形参标识符的 defId 填好。
+     * 绑定一个泛型形参（`fn foo<T, E>`）：登记符号并标记为类型参数。
+     * 使形参返回�?函数体里的类型注解（�?`x: T`、`-> Array<T>`）能解析到它�?
+     *
+     * 声明处嵌套类型参数（`fn foo<T, E<U>>`）意味着 E �?类型构造器"（高阶类型，
+     * kind `* -> *`），当前类型系统尚不支持——报诊断并只绑定头部名字 E（见 TODO）�?
+     */
+    private fun resolveTypeParam(typeParam: Expr.Identifier, scope: Scope) {
+        val name = (typeParam.token.literal as? String) ?: typeParam.token.type.toString()
+        // TODO: 支持高阶类型（类型构造器作为类型参数）后移除这段诊断�?
+        //  届时 `E<U>` 中的 U 应作�?E 的形参绑定到独立作用�?
+        if (typeParam.typeArgs != null && !typeParam.typeArgs.isEmpty) {
+            error(bundle.format("diag.hkt-not-supported", name))
+                .label(typeParam, bundle.get("diag.hkt-not-supported.help"))
+        }
+        val symbol = declare(name, BuiltinType.Unknown, typeParam.span, scope)
+        symbol?.values?.put(Symbol.TYPE_PARAM_KEY, true)
+        typeParam.defId = symbol?.id
+    }
+
+    /**
+     * 形参绑定：形参可能是 `Identifier` �?`Annotation(Identifier, 注解...)`�?
+     * 绑定名称 �?DefId，并把形参标识符�?defId 填好�?
      */
     private fun bindParam(param: Expr, scope: Scope) {
         val ident = unwrapIdentifier(param) ?: return
@@ -182,15 +205,15 @@ class Resolver(private val problems: DiagHandler) {
         val symbol = declare(name, BuiltinType.Unknown, ident.span, scope)
         ident.defId = symbol?.id
 
-        // 形参类型注解：这里只做「类型名 → DefId」的名称解析，
-        // 注解 → Type 的转换与约束生成由 TypeInferencer 完成（职责分离，见 resolveAnnotationNames）。
+        // 形参类型注解：这里只做「类型名 �?DefId」的名称解析�?
+        // 注解 �?Type 的转换与约束生成�?TypeInferencer 完成（职责分离，�?resolveAnnotationNames）�?
         if (param is Expr.Annotation) {
             for (variant in param.annotations) resolveAnnotationNames(variant, scope)
         }
     }
 
     /**
-     * 循环变量绑定（for 循环的 varDecl）。
+     * 循环变量绑定（for 循环�?varDecl）�?
      */
     private fun resolveLoopVar(varDecl: Expr.Identifier, scope: Scope) {
         val name = (varDecl.token.literal as? String) ?: varDecl.token.type.toString()
@@ -199,20 +222,32 @@ class Resolver(private val problems: DiagHandler) {
     }
 
     /**
-     * `set` 声明变量：登记符号并绑定；随后解析其赋值语句。
-     * var 可能是 `Identifier` 或 `Annotation(Identifier, ...)`。
+     * `set` 声明变量：登记符号并绑定；随后解析其赋值语句�?
+     * var 可能�?`Identifier` �?`Annotation(Identifier, ...)`�?
      */
     private fun resolveSetVarStmt(stmt: Stmt.SetVarStmt, scope: Scope) {
         val ident = unwrapIdentifier(stmt.`var`)
         if (ident != null) {
+            // `set var<T>`：变量名携带类型实参是误用——变量不是泛型，
+            // 类型应写在注解里（`set var : Foo<Int>`）�?
+            // TODO: 若未来支�?Rust turbofish 风格的泛型函数引用赋值（`set f = id<Int>`），
+            //  只允�?RHS 携带类型实参，LHS 依旧不允许�?
+            if (ident.typeArgs != null && !ident.typeArgs.isEmpty) {
+                error(bundle.get("diag.var-with-type-args"))
+                    .label(ident, bundle.get("diag.var-with-type-args.help"))
+            }
             val name = (ident.token.literal as? String) ?: ident.token.type.toString()
             val symbol = declare(name, BuiltinType.Unknown, ident.span, scope)
             ident.defId = symbol?.id
         }
+        // 变量类型注解中的类型名也要解析（`set a : Array<Int>` 里的 `Array` �?`Int`�?
+        if (stmt.`var` is Expr.Annotation) {
+            for (variant in stmt.`var`.annotations) resolveAnnotationNames(variant, scope)
+        }
         resolveStmt(stmt.assignStmt, scope)
     }
 
-    // ========== 表达式解析 ==========
+    // ========== 表达式解�?==========
     private fun resolveExpr(expr: Expr?, scope: Scope) {
         if (expr == null) return
         when (expr) {
@@ -225,6 +260,8 @@ class Resolver(private val problems: DiagHandler) {
                 } else {
                     expr.defId = defId
                 }
+                // 值位置携带的类型实参（`foo<Int>`、`id<Array<Str>>`）是类型名，按类型名解析
+                expr.typeArgs?.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
             }
 
             is Expr.Literal, is Expr.ErrorExpr -> Unit
@@ -235,7 +272,7 @@ class Resolver(private val problems: DiagHandler) {
 
             is Expr.Annotation -> {
                 // 只解析被注解的表达式主体；注解中的类型名由类型系统后续处理，
-                // 这里不解析，避免把类型名误报为"未声明的标识符"。
+                // 这里不解析，避免把类型名误报�?未声明的标识�?�?
                 resolveExpr(expr.expr, scope)
             }
 
@@ -274,7 +311,7 @@ class Resolver(private val problems: DiagHandler) {
 
     // ========== 工具 ==========
     /**
-     * 从 `Identifier` 或 `Annotation(Identifier, ...)` 中取出标识符。
+     * �?`Identifier` �?`Annotation(Identifier, ...)` 中取出标识符�?
      */
     private fun unwrapIdentifier(expr: Expr): Expr.Identifier? {
         return when (expr) {
@@ -285,8 +322,8 @@ class Resolver(private val problems: DiagHandler) {
     }
 
     /**
-     * 在当前作用域声明一个定义：分配 DefId、登记到符号表、绑定名称。
-     * 若名称在当前作用域重复，报错并返回 null。
+     * 在当前作用域声明一个定义：分配 DefId、登记到符号表、绑定名称�?
+     * 若名称在当前作用域重复，报错并返�?null�?
      */
     private fun declare(name: String, type: Type, span: Span, scope: Scope): Symbol? {
         if (scope.containsLocal(name)) {
@@ -306,8 +343,8 @@ class Resolver(private val problems: DiagHandler) {
     }
 
     /**
-     * 解析类型注解中的类型名（只做名称解析，不做类型推断）。
-     * 递归处理 Annotation/Identifier/TypePath 等类型表达式。
+     * 解析类型注解中的类型名（只做名称解析，不做类型推断）�?
+     * 递归处理 Annotation/Identifier/TypePath 等类型表达式�?
      */
     private fun resolveAnnotationNames(expr: Expr, scope: Scope) {
         when (expr) {
@@ -320,6 +357,8 @@ class Resolver(private val problems: DiagHandler) {
                 } else {
                     expr.defId = defId
                 }
+                // 递归解析类型实参（`Array<Int>` 中的 `Int`、`Array<Array<T>>` 中的内层 `Array`/`T`�?
+                expr.typeArgs?.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
             }
 
             is Expr.Annotation -> {
@@ -344,7 +383,7 @@ class Resolver(private val problems: DiagHandler) {
                 resolveAnnotationNames(expr.obj, scope)
                 resolveAnnotationNames(expr.field, scope)
             }
-            // 其他类型表达式暂不处理
+            // 其他类型表达式暂不处�?
             else -> {}
         }
     }

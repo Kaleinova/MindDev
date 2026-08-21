@@ -28,6 +28,10 @@ interface TypeVisitor {
 
             is Type.Arr -> visit(type.element)
 
+            is Type.App -> {
+                for (a in type.args) visit(a)
+            }
+
             is Type.TupleType -> {
                 for (e in type.elements) visit(e)
             }

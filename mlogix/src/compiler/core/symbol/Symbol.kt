@@ -23,8 +23,16 @@ class Symbol(
     /** 符号定义处的位置 */
     val span: Span,
 ) {
-    /** 类型方案（∀ 多态）。泛型声明语法就绪后由 Resolver 填充 [TypeScheme.typeVars]。 */
+    /** 类型方案（∀ 多态）。泛型函数声明就绪后由 TypeInferencer 填充 [TypeScheme.typeVars]。 */
     var typeScheme: TypeScheme = TypeScheme(Seq(), type)
 
     var values = ObjectMap<String?, Any?>()
+
+    companion object {
+        /** [values] 中标记"类型参数"符号的键（Resolver 写入，TypeInferencer 读取）。 */
+        const val TYPE_PARAM_KEY = "isTypeParam"
+
+        /** [values] 中记录函数声明类型参数数量的键（调用处显式实参数量检查用）。 */
+        const val TYPE_PARAM_COUNT_KEY = "typeParamCount"
+    }
 }
