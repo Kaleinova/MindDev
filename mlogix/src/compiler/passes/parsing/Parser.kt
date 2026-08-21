@@ -339,35 +339,18 @@ class Parser(
             error(bundle.get("diag.miss-fn-name")).label(start)
         }
 
-        var typeParams: Seq<Expr>? = null
+        var typeParams: Seq<Expr.Identifier>? = null
         if (check(TokenType.LESS)) {
-            val lAngle = next()
-            var isSeparatorOptional = false
-            typeParams = seq(
-                {
-                    consume(TokenType.IDENTIFIER) {
-                        error(bundle.get("diag.miss-ident-as-type-param")).label(lookAhead(0))
-                    }?.let {
-                        val expr = annotation(Expr.Identifier(it))
-                        isSeparatorOptional = expr !is Expr.Annotation
-                        return@let expr
-                    }
-                },
-                EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
-                { isSeparatorOptional },
-                {
-                    error(bundle.get("diag.miss-type-param-separator"))
-                        .label(lookAhead(0))
-                        .label(lAngle, bundle.get("diag.type-param-start"))
-                },
-                TokenType.GREATER,
-                true,
-                {
-                    error(bundle.get("diag.miss-type-param-end"))
-                        .label(lookAhead(0))
-                        .label(lAngle, bundle.get("diag.param-start"))
+            val result = typeArgs()
+            if (result != null) {
+                if (result.remaining != 0) {
+                    error(bundle.get("diag.redundant-gt"))
+                        .label(prevToken.span.cutLast(result.remaining))
                 }
-            )
+                if (result.args.size != 0) {
+                    typeParams = result.args
+                }
+            }
         }
 
         if (!check(TokenType.LPAREN)) {
@@ -892,7 +875,7 @@ class Parser(
                     remaining--
                     return TypeArgsResult(args, remaining)
                 }
-                // 文件结束，需要回溯
+                // 文件结束，建议回溯
                 if (isAtEnd) {
                     return null
                 }
@@ -929,14 +912,15 @@ class Parser(
                     // 子泛型解析失败，本泛型同样失败
                     return null
                 }
+                val parentId = prevToken
+                val afterParentId = lookAhead(0)
                 // 能恢复到结束符则报错并返回零个泛型，无需回溯
-                val start = prevToken
                 if (TokenType.RIGHT_ANGLE_BRACKETS.contains(
                         recover(TokenType.RECOVERY + TokenType.RIGHT_ANGLE_BRACKETS - TokenType.RPAREN)
                     )
                 ) {
                     error(bundle.get("diag.miss-ident-as-type-param"))
-                        .label(between(start, prevToken))
+                        .label(between(parentId, prevToken))
                     when {
                         match(TokenType.GREATER) ->
                             return TypeArgsResult(Seq(0), remaining)
@@ -954,7 +938,13 @@ class Parser(
                         }
                     }
                 }
-                // 失败，回溯
+                // 失败后选择不回溯则保留的错误诊断
+                error(bundle.get("diag.miss-type-param-end")).apply {
+                    label(between(afterParentId, prevToken))
+                    help(bundle.get("diag.miss-type-param-end.help"))
+                        .insert(afterParentId, ">")
+                }
+                // 失败，建议回溯
                 return null
             }
         }

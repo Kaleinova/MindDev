@@ -64,7 +64,7 @@ abstract class Stmt(span: Span) : ASTNode(span) {
     data class FnStmt(
         override val span: Span,
         val name: Token?,
-        val typeParams: Seq<Expr>?,
+        val typeParams: Seq<Expr.Identifier>?,
         val params: Seq<Expr>?,
         val results: Seq<Expr>?,
         val body: Stmt?
