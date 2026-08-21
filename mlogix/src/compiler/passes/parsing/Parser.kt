@@ -913,6 +913,7 @@ class Parser(
                             args.add(Expr.Identifier(id, subArgs.args))
                         }
                         remaining += subArgs.remaining
+                        match(TokenType.COMMA)
                         continue
                     }
                 }
