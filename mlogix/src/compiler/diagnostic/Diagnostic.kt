@@ -155,10 +155,10 @@ abstract class Diagnostic(
     private fun renderSnippet(file: SourceFile, labels: Seq<Label>, fileMark: String, maxLineStrLen: Int): String {
         return buildString {
             val primary = labels[0]
-            val lineStr = (file.getLine(primary.span.start()) + 1).toString()
+            val lineNumStr = (file.getLine(primary.span.start()) + 1).toString()
             val colStr = (file.getCol(primary.span.start()) + 1).toString()
             append(" ".repeat(maxLineStrLen))
-            append("$fileMark ${file.relativePath}:$lineStr:$colStr\n")
+            append("$fileMark ${file.relativePath}:$lineNumStr:$colStr\n")
 
             labels.sort(Comparator { a, b ->
                 val lineDiff = file.getLine(a.span.start()) - file.getLine(b.span.start())
@@ -198,11 +198,11 @@ abstract class Diagnostic(
     }
 
     private fun renderLine(file: SourceFile, line: Int, maxLineStrLen: Int): String {
-        val lineStr = (line + 1).toString()
+        val lineNumStr = (line + 1).toString()
         return buildString {
             // 源码行
             append(
-                "${Ansi.CYAN}${" ".repeat(maxLineStrLen - lineStr.length)}$lineStr | ${Ansi.DEFAULT}${
+                "${Ansi.CYAN}${" ".repeat(maxLineStrLen - lineNumStr.length)}$lineNumStr | ${Ansi.DEFAULT}${
                     file.getLineString(line)
                 }\n"
             )
@@ -210,12 +210,12 @@ abstract class Diagnostic(
     }
 
     private fun renderLine(file: SourceFile, line: Int, originalLabels: Seq<Label>, maxLineStrLen: Int): String {
-        val lineStr = (line + 1).toString()
+        val lineNumStr = (line + 1).toString()
 
         return buildString {
             // 源码行
             append(
-                "${Ansi.CYAN}${" ".repeat(maxLineStrLen - lineStr.length)}$lineStr | ${Ansi.DEFAULT}${
+                "${Ansi.CYAN}${" ".repeat(maxLineStrLen - lineNumStr.length)}$lineNumStr | ${Ansi.DEFAULT}${
                     file.getLineString(line)
                 }\n"
             )
@@ -336,18 +336,18 @@ abstract class Diagnostic(
                 val file = map.getSourceFile(label.span.index()) ?: continue
                 val line = file.getLine(label.span.start())
                 val col = file.getCol(label.span.start())
-                val lineStr = (line + 1).toString()
+                val lineNumStr = (line + 1).toString()
                 if (line != primaryLine) {
                     val colStr = (col + 1).toString()
                     append(" ".repeat(maxLineStrLen))
-                    append("--> ${file.relativePath}:$lineStr:$colStr\n")
+                    append("--> ${file.relativePath}:$lineNumStr:$colStr\n")
                 }
                 append("${renderBlank(maxLineStrLen)}\n")
                 val lineString = file.getLineString(line)
                 when (label.style) {
                     LabelStyle.Insert -> {
-                        append(" ".repeat(maxLineStrLen - lineStr.length))
-                        append(Ansi.CYAN + lineStr + " ~ " + Ansi.DEFAULT)
+                        append(" ".repeat(maxLineStrLen - lineNumStr.length))
+                        append(Ansi.CYAN + lineNumStr + " ~ " + Ansi.DEFAULT)
                         append(lineString.replaceRange(col, col, label.text))
                         append("\n")
                         append(renderBlank(maxLineStrLen))
@@ -355,8 +355,8 @@ abstract class Diagnostic(
                     }
 
                     LabelStyle.Delete -> {
-                        append(" ".repeat(maxLineStrLen - lineStr.length))
-                        append(Ansi.CYAN + lineStr + " ~ " + Ansi.DEFAULT)
+                        append(" ".repeat(maxLineStrLen - lineNumStr.length))
+                        append(Ansi.CYAN + lineNumStr + " ~ " + Ansi.DEFAULT)
                         append(lineString)
                         append("\n")
                         append(renderBlank(maxLineStrLen))
@@ -364,16 +364,16 @@ abstract class Diagnostic(
                     }
 
                     LabelStyle.Replace -> {
-                        append(" ".repeat(maxLineStrLen - lineStr.length))
-                        append(Ansi.RED + lineStr + " - " + Ansi.DEFAULT)
+                        append(" ".repeat(maxLineStrLen - lineNumStr.length))
+                        append(Ansi.RED + lineNumStr + " - " + Ansi.DEFAULT)
                         append(lineString.replaceRange(
                             col,
                             col + markLen(file, label.span),
                             Ansi.B_RED + lineString.substring(col, col + markLen(file, label.span)) + Ansi.DEFAULT,
                         ) + "\n")
 
-                        append(" ".repeat(maxLineStrLen - lineStr.length))
-                        append(Ansi.GREEN + lineStr + " + " + Ansi.DEFAULT)
+                        append(" ".repeat(maxLineStrLen - lineNumStr.length))
+                        append(Ansi.GREEN + lineNumStr + " + " + Ansi.DEFAULT)
                         append(
                             lineString.replaceRange(
                                 col,
