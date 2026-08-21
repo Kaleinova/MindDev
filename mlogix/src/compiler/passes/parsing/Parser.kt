@@ -332,7 +332,6 @@ class Parser(
         return null
     }
 
-
     private fun fnStmt(): Stmt {
         val start = next()
 
@@ -404,8 +403,12 @@ class Parser(
         )
 
         val results = Seq<Expr>(3)
-        if (check(TokenType.ARROW)) {
+        if (check(TokenType.ARROW) || check(TokenType.COLON)) {
             val arrow = next()
+            if (arrow.type == TokenType.COLON) {
+                error(bundle.get("diag.expected-arrow-but-colon"))
+                    .label(arrow)
+            }
             if (check(TokenType.QUESTION_MARK)) {
                 results.add(Expr.Identifier(Token(next().span, TokenType.IDENTIFIER, "Null")))
                 if (check(TokenType.COMMA)) {
