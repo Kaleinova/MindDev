@@ -97,7 +97,7 @@ class SourceMap(/* 项目根目录 */val projectPath: Fi) {
                 when (charAt(i)) {
                     '\n' -> { // LF (Unix)
                         i++
-                        if (i < length()) offsetList.add(i)
+                        if (i <= length()) offsetList.add(i)
                     }
 
                     '\r' -> { // CR (Mac) 或 CRLF (Windows)
@@ -106,6 +106,8 @@ class SourceMap(/* 项目根目录 */val projectPath: Fi) {
                             if (charAt(i) == '\n') {
                                 i++
                             }
+                        }
+                        if (i <= length()) {
                             offsetList.add(i)
                         }
                     }
