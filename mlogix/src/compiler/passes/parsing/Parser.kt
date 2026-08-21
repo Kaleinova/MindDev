@@ -878,18 +878,25 @@ class Parser(
 
     private data class TypeArgsResult(val args: Seq<Expr.Identifier>, val remaining: Int)
 
+    /**
+     * @return `null` 解析失败，建议回溯；
+     * `TypeArgsResult{ args = Seq(0), _ }` 无泛型或解析失败，无需回溯
+     */
     private fun typeArgs(): TypeArgsResult? {
         if (match(TokenType.LESS)) {
             val args = Seq<Expr.Identifier>(2)
             var remaining = 0
             while (true) {
-                if (isAtEnd) {
-                    return null
-                }
+                // 优先使用剩下的结束符
                 if (remaining != 0) {
                     remaining--
                     return TypeArgsResult(args, remaining)
                 }
+                // 文件结束，需要回溯
+                if (isAtEnd) {
+                    return null
+                }
+                // 正常结束并返回剩余的结束符
                 when {
                     match(TokenType.GREATER) ->
                         return TypeArgsResult(args, remaining)
@@ -919,10 +926,39 @@ class Parser(
                         match(TokenType.COMMA)
                         continue
                     }
+                    // 子泛型解析失败，本泛型同样失败
+                    return null
                 }
+                // 能恢复到结束符则报错并返回零个泛型，无需回溯
+                val start = prevToken
+                if (TokenType.RIGHT_ANGLE_BRACKETS.contains(
+                        recover(TokenType.RECOVERY + TokenType.RIGHT_ANGLE_BRACKETS - TokenType.RPAREN)
+                    )
+                ) {
+                    error(bundle.get("diag.miss-ident-as-type-param"))
+                        .label(between(start, prevToken))
+                    when {
+                        match(TokenType.GREATER) ->
+                            return TypeArgsResult(Seq(0), remaining)
+
+                        match(TokenType.SAR) -> {
+                            // >> 用掉一个剩一个
+                            remaining += 1
+                            return TypeArgsResult(Seq(0), remaining)
+                        }
+
+                        match(TokenType.SHR) -> {
+                            // >>> 用掉一个剩两个
+                            remaining += 2
+                            return TypeArgsResult(Seq(0), remaining)
+                        }
+                    }
+                }
+                // 失败，回溯
                 return null
             }
         }
+        // 无泛型参数
         return TypeArgsResult(Seq(0), 0)
     }
 
@@ -1350,11 +1386,13 @@ class Parser(
     /**
      * 错误恢复，扫描直到期望的TokenType，但不会消耗
      */
-    private fun recover(expecteds: EnumSet<TokenType>) {
+    private fun recover(expecteds: Set<TokenType>): TokenType {
         while (!isAtEnd) {
-            if (check(expecteds)) return
+            val type = lookAhead(0).type
+            if (expecteds.contains(type)) return type
             next()
         }
+        return TokenType.EOF
     }
 
     private fun createSnapshot(): Snapshot {

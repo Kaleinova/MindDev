@@ -1,6 +1,6 @@
 package mlogix.compiler.core.token
 
-import java.util.EnumSet
+import java.util.*
 
 enum class TokenType(private val keyword: String? = null) {
     // 关键字
@@ -214,6 +214,10 @@ enum class TokenType(private val keyword: String? = null) {
 
         val ADD_SUB_OPERATORS: Set<TokenType> = EnumSet.of(
             PLUS, MINUS
+        )
+
+        val RIGHT_ANGLE_BRACKETS: Set<TokenType> = EnumSet.of(
+            GREATER, SAR, SHR
         )
 
         val SEPARATORS: Set<TokenType> = EnumSet.of(
