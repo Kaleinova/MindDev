@@ -343,11 +343,12 @@ abstract class Diagnostic(
                     append("--> ${file.relativePath}:$lineStr:$colStr\n")
                 }
                 append("${renderBlank(maxLineStrLen)}\n")
+                val lineString = file.getLineString(line)
                 when (label.style) {
                     LabelStyle.Insert -> {
                         append(" ".repeat(maxLineStrLen - lineStr.length))
                         append(Ansi.CYAN + lineStr + " ~ " + Ansi.DEFAULT)
-                        append(file.getLineString(line).replaceRange(col, col, label.text))
+                        append(lineString.replaceRange(col, col, label.text))
                         append("\n")
                         append(renderBlank(maxLineStrLen))
                         append(" ".repeat(col) + "+".repeat(label.text.length) + "\n")
@@ -356,7 +357,7 @@ abstract class Diagnostic(
                     LabelStyle.Delete -> {
                         append(" ".repeat(maxLineStrLen - lineStr.length))
                         append(Ansi.CYAN + lineStr + " ~ " + Ansi.DEFAULT)
-                        append(file.getLineString(line))
+                        append(lineString)
                         append("\n")
                         append(renderBlank(maxLineStrLen))
                         append(" ".repeat(col) + "-".repeat(markLen(file, label.span)) + "\n")
@@ -365,15 +366,19 @@ abstract class Diagnostic(
                     LabelStyle.Replace -> {
                         append(" ".repeat(maxLineStrLen - lineStr.length))
                         append(Ansi.RED + lineStr + " - " + Ansi.DEFAULT)
-                        append(file.getLineString(line) + "\n")
+                        append(lineString.replaceRange(
+                            col,
+                            col + markLen(file, label.span),
+                            Ansi.B_RED + lineString.substring(col, col + markLen(file, label.span)) + Ansi.DEFAULT,
+                        ) + "\n")
 
                         append(" ".repeat(maxLineStrLen - lineStr.length))
                         append(Ansi.GREEN + lineStr + " + " + Ansi.DEFAULT)
                         append(
-                            file.getLineString(line).replaceRange(
+                            lineString.replaceRange(
                                 col,
                                 col + markLen(file, label.span),
-                                label.text
+                                Ansi.B_GREEN + label.text + Ansi.DEFAULT,
                             ) + "\n"
                         )
                         append(renderBlank(maxLineStrLen))
