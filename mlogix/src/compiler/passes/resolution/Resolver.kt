@@ -177,15 +177,15 @@ class Resolver(private val problems: DiagHandler) {
 
     /**
      * 绑定一个泛型形参（`fn foo<T, E>`）：登记符号并标记为类型参数。
-     * 使形参返回�?函数体里的类型注解（�?`x: T`、`-> Array<T>`）能解析到它�?
+     * 使形参返回函数体里的类型注解（`x: T`、`-> Array<T>`）能解析到它。
      *
-     * 声明处嵌套类型参数（`fn foo<T, E<U>>`）意味着 E �?类型构造器"（高阶类型，
-     * kind `* -> *`），当前类型系统尚不支持——报诊断并只绑定头部名字 E（见 TODO）�?
+     * 声明处嵌套类型参数（`fn foo<T, E<U>>`）意味着 E 类型构造器"（高阶类型，
+     * kind `* -> *`），当前类型系统尚不支持——报诊断并只绑定头部名字 E（见 TODO）
      */
     private fun resolveTypeParam(typeParam: Expr.Identifier, scope: Scope) {
         val name = (typeParam.token.literal as? String) ?: typeParam.token.type.toString()
-        // TODO: 支持高阶类型（类型构造器作为类型参数）后移除这段诊断�?
-        //  届时 `E<U>` 中的 U 应作�?E 的形参绑定到独立作用�?
+        // TODO: 支持高阶类型（类型构造器作为类型参数）后移除这段诊断。
+        //  届时 `E<U>` 中的 U 应作为 E 的形参绑定到独立作用。
         if (typeParam.typeArgs != null && !typeParam.typeArgs.isEmpty) {
             error(bundle.format("diag.hkt-not-supported", name))
                 .label(typeParam, bundle.get("diag.hkt-not-supported.help"))
@@ -196,8 +196,8 @@ class Resolver(private val problems: DiagHandler) {
     }
 
     /**
-     * 形参绑定：形参可能是 `Identifier` �?`Annotation(Identifier, 注解...)`�?
-     * 绑定名称 �?DefId，并把形参标识符�?defId 填好�?
+     * 形参绑定：形参可能是 `Identifier` `Annotation(Identifier, 注解...)`。
+     * 绑定名称 DefId，并把形参标识符 defId 填好。
      */
     private fun bindParam(param: Expr, scope: Scope) {
         val ident = unwrapIdentifier(param) ?: return
@@ -205,15 +205,15 @@ class Resolver(private val problems: DiagHandler) {
         val symbol = declare(name, BuiltinType.Unknown, ident.span, scope)
         ident.defId = symbol?.id
 
-        // 形参类型注解：这里只做「类型名 �?DefId」的名称解析�?
-        // 注解 �?Type 的转换与约束生成�?TypeInferencer 完成（职责分离，�?resolveAnnotationNames）�?
+        // 形参类型注解：这里只做「类型名 DefId」的名称解析。
+        // 注解 Type 的转换与约束生成 TypeInferencer 完成（职责分离，resolveAnnotationNames）。
         if (param is Expr.Annotation) {
             for (variant in param.annotations) resolveAnnotationNames(variant, scope)
         }
     }
 
     /**
-     * 循环变量绑定（for 循环�?varDecl）�?
+     * 循环变量绑定（for 循环 varDecl）。
      */
     private fun resolveLoopVar(varDecl: Expr.Identifier, scope: Scope) {
         val name = (varDecl.token.literal as? String) ?: varDecl.token.type.toString()
@@ -222,16 +222,16 @@ class Resolver(private val problems: DiagHandler) {
     }
 
     /**
-     * `set` 声明变量：登记符号并绑定；随后解析其赋值语句�?
-     * var 可能�?`Identifier` �?`Annotation(Identifier, ...)`�?
+     * `set` 声明变量：登记符号并绑定；随后解析其赋值语句。
+     * var 可能是 `Identifier` `Annotation(Identifier, ...)`。
      */
     private fun resolveSetVarStmt(stmt: Stmt.SetVarStmt, scope: Scope) {
         val ident = unwrapIdentifier(stmt.`var`)
         if (ident != null) {
             // `set var<T>`：变量名携带类型实参是误用——变量不是泛型，
-            // 类型应写在注解里（`set var : Foo<Int>`）�?
-            // TODO: 若未来支�?Rust turbofish 风格的泛型函数引用赋值（`set f = id<Int>`），
-            //  只允�?RHS 携带类型实参，LHS 依旧不允许�?
+            // 类型应写在注解里（`set var : Foo<Int>`）
+            // TODO: 若未来支持 Rust turbofish 风格的泛型函数引用赋值（`set f = id<Int>`），
+            //  只允许 RHS 携带类型实参，LHS 依旧不允许
             if (ident.typeArgs != null && !ident.typeArgs.isEmpty) {
                 error(bundle.get("diag.var-with-type-args"))
                     .label(ident, bundle.get("diag.var-with-type-args.help"))
@@ -240,14 +240,14 @@ class Resolver(private val problems: DiagHandler) {
             val symbol = declare(name, BuiltinType.Unknown, ident.span, scope)
             ident.defId = symbol?.id
         }
-        // 变量类型注解中的类型名也要解析（`set a : Array<Int>` 里的 `Array` �?`Int`�?
+        // 变量类型注解中的类型名也要解析（`set a : Array<Int>` 里的 `Array` `Int`）
         if (stmt.`var` is Expr.Annotation) {
             for (variant in stmt.`var`.annotations) resolveAnnotationNames(variant, scope)
         }
         resolveStmt(stmt.assignStmt, scope)
     }
 
-    // ========== 表达式解�?==========
+    // ========== 表达式解析==========
     private fun resolveExpr(expr: Expr?, scope: Scope) {
         if (expr == null) return
         when (expr) {
@@ -272,7 +272,7 @@ class Resolver(private val problems: DiagHandler) {
 
             is Expr.Annotation -> {
                 // 只解析被注解的表达式主体；注解中的类型名由类型系统后续处理，
-                // 这里不解析，避免把类型名误报�?未声明的标识�?�?
+                // 这里不解析，避免把类型名误报成未声明的标识。
                 resolveExpr(expr.expr, scope)
             }
 
@@ -311,7 +311,7 @@ class Resolver(private val problems: DiagHandler) {
 
     // ========== 工具 ==========
     /**
-     * �?`Identifier` �?`Annotation(Identifier, ...)` 中取出标识符�?
+     * 从`Identifier` 和 `Annotation(Identifier, ...)` 中取出标识符。
      */
     private fun unwrapIdentifier(expr: Expr): Expr.Identifier? {
         return when (expr) {
@@ -322,8 +322,8 @@ class Resolver(private val problems: DiagHandler) {
     }
 
     /**
-     * 在当前作用域声明一个定义：分配 DefId、登记到符号表、绑定名称�?
-     * 若名称在当前作用域重复，报错并返�?null�?
+     * 在当前作用域声明一个定义：分配 DefId、登记到符号表、绑定名称
+     * 若名称在当前作用域重复，报错并返回 `null`
      */
     private fun declare(name: String, type: Type, span: Span, scope: Scope): Symbol? {
         if (scope.containsLocal(name)) {
@@ -343,8 +343,8 @@ class Resolver(private val problems: DiagHandler) {
     }
 
     /**
-     * 解析类型注解中的类型名（只做名称解析，不做类型推断）�?
-     * 递归处理 Annotation/Identifier/TypePath 等类型表达式�?
+     * 解析类型注解中的类型名（只做名称解析，不做类型推断）。
+     * 递归处理 Annotation/Identifier/TypePath 等类型表达式。
      */
     private fun resolveAnnotationNames(expr: Expr, scope: Scope) {
         when (expr) {
@@ -357,7 +357,7 @@ class Resolver(private val problems: DiagHandler) {
                 } else {
                     expr.defId = defId
                 }
-                // 递归解析类型实参（`Array<Int>` 中的 `Int`、`Array<Array<T>>` 中的内层 `Array`/`T`�?
+                // 递归解析类型实参（`Array<Int>` 中的 `Int`、`Array<Array<T>>` 中的内层 `Array`/`T`）
                 expr.typeArgs?.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
             }
 
@@ -383,7 +383,7 @@ class Resolver(private val problems: DiagHandler) {
                 resolveAnnotationNames(expr.obj, scope)
                 resolveAnnotationNames(expr.field, scope)
             }
-            // 其他类型表达式暂不处�?
+            // 其他类型表达式暂不处理
             else -> {}
         }
     }
