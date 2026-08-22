@@ -96,8 +96,7 @@ class ParserTest {
                     Expr.Call(
                         span,
                         Expr.Identifier(token(TokenType.IDENTIFIER, "print")),
-                        null,
-                        Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "i")))
+                        Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "i"))),
                     )
                 )
             )
@@ -179,7 +178,7 @@ class ParserTest {
     fun `parse function call`() {
         val ast = parser.parse("add(1, 2)")
         val call = Expr.Call(
-            span, Expr.Identifier(token(TokenType.IDENTIFIER, "add")), null, Seq.with(
+            span, Expr.Identifier(token(TokenType.IDENTIFIER, "add")), Seq.with(
                 Expr.Literal(token(TokenType.INT, 1.0)), Expr.Literal(token(TokenType.INT, 2.0))
             )
         )

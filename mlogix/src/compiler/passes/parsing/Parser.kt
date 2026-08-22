@@ -764,7 +764,7 @@ class Parser(
                     val args = Seq<Expr>(8)
                     while (true) {
                         if (check(TokenType.RPAREN)) {
-                            expr = Expr.Call(between(expr, next()), expr, null, args)
+                            expr = Expr.Call(between(expr, next()), expr,  args)
                             break
                         }
                         val innerExpr = expression()

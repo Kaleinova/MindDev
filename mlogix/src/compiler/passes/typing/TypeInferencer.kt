@@ -519,8 +519,6 @@ class TypeInferencer(val problems: DiagHandler) {
                 val combined = Seq<Constraint>(0)
                 combined.addAll(callee.constraints)
                 // 类型实参挂在 callee 的 Identifier 上（`foo<Int>(...)`），由 inferExpr(Identifier)
-                // 按调用点实例化；Expr.Call.typeArgs 当前恒为 null，若未来解析器改为填充它，
-                // 在此合并到 callee 的实参上（TODO）。
 
                 // 实参类型：逐个推断
                 val argTypes = Seq<Type>(expr.args.size)

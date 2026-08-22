@@ -41,7 +41,7 @@ sealed class Type {
      * - 与 [Func] 一样，`args` 为 [Seq]，结构相等只比较 [con]（具名构造类型），
      *   参数逐元素合一，不依赖 Seq 的值相等。
      */
-    data class App(val con: Type.Con, val args: Seq<Type>) : Type()
+    data class App(val con: Con, val args: Seq<Type>) : Type()
 
     /** 未定类型：尚未被约束（允许再次推断） */
     data object Unknown : Type()
