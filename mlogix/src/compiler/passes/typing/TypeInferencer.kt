@@ -690,8 +690,7 @@ class TypeInferencer(val problems: DiagHandler) {
             symbol == null -> Type.Error
             symbol.values.get(Symbol.TYPE_PARAM_KEY) == true -> symbol.type
             symbol.type == BuiltinType.Array ->
-                // 裸 `Array`：宽松视为 `Array<?>`
-                // TODO: 严格模式（Rust 风格）下应报"`Array` 需要 1 个类型实参"
+                // 裸 `Array`：宽松视为 `Array<Unknown>`
                 Type.App(BuiltinType.Array, Seq.with(solver.freshVar()))
             else -> symbol.type
         }
