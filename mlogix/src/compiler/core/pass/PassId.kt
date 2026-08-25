@@ -1,5 +1,7 @@
 package mlogix.compiler.core.pass
 
+import mlogix.compiler.passes.parsing.ParsingPass
+
 /**
  * 编译通行证的唯一标识。
  *
@@ -10,6 +12,9 @@ package mlogix.compiler.core.pass
 enum class PassId {
     /** 词法+语法分析（一个 Pass 完成，Parser 持有 Lexer 按需扫描 Token） */
     PARSE,
+
+    /** 词法分析 仅在 [mlogix.compiler.core.CompilationMode.TOKENIZATION] 时使用，否则被包含在 [ParsingPass] 中 */
+    TOKENIZATION,
 
     RESOLUTION,
     DESUGAR,

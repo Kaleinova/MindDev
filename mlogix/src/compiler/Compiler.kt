@@ -61,6 +61,13 @@ class Compiler(projectPath: Fi, private val config: CompilerConfig) {
                             println()
                         }
                     }
+
+                    CompilationMode.TOKENIZATION -> {
+                        val pipeline: Pipeline<SourceFile, Seq<Token>> =
+                            Pipeline.from(TokenizationPass(Lexer(diagHandler)))
+
+                        val tokens = pipeline.execute(sourceFile, context) // 类型为 Seq<Token>
+                    }
                 }
                 timer.endPhase()
 
