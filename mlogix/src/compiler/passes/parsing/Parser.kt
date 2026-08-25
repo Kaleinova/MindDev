@@ -485,7 +485,7 @@ class Parser(
             if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return SetVarStmt(between(start, expr), expr, null)
         } else {
-            // assignStmt(_)消耗了StmtEnd
+            if (assignStmt.value is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return SetVarStmt(between(start, assignStmt), expr, assignStmt)
         }
     }
@@ -503,7 +503,7 @@ class Parser(
             if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return ExprStmt(expr.span, expr)
         } else {
-            // assignStmt(_)消耗了StmtEnd
+            if (assignStmt.value is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return assignStmt
         }
     }
@@ -531,7 +531,6 @@ class Parser(
                 return null
             }
             val value = expression()
-            if (value is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return AssignStmt(between(expr, value), expr, operator, value)
 
         } else if (check(TokenType.ASSIGNS)) {
@@ -543,7 +542,6 @@ class Parser(
                 return null
             }
             val right = expression()
-            if (right is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return AssignStmt(
                 between(expr, right),
                 expr,
