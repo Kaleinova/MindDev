@@ -332,12 +332,10 @@ class Parser(
         return null
     }
 
-    private fun fnStmt(): Stmt {
+    private fun fnStmt(): FnStmt {
         val start = next()
 
-        val name = consume(TokenType.IDENTIFIER) {
-            error(bundle.get("diag.miss-fn-name")).label(start)
-        }
+        val name = if (check(TokenType.IDENTIFIER)) next() else null
 
         var typeParams: Seq<Expr.Identifier>? = null
         if (check(TokenType.LESS)) {
@@ -353,37 +351,37 @@ class Parser(
             }
         }
 
-        if (!check(TokenType.LPAREN)) {
-            return FnStmt(start.span, name, typeParams, null, null, null)
-        }
-        val lParen = next()
+        var parameters : Seq<Expr>? = null
+        if (check(TokenType.LPAREN)) {
+            val lParen = next()
 
-        var isSeparatorOptional = false
-        val parameters = seq(
-            {
-                consume(TokenType.IDENTIFIER) {
-                    error(bundle.get("diag.miss-ident-as-param")).label(lookAhead(0))
-                }?.let {
-                    val expr = annotation(Expr.Identifier(it))
-                    isSeparatorOptional = expr !is Expr.Annotation
-                    return@let expr
+            var isSeparatorOptional = false
+            parameters = seq(
+                {
+                    consume(TokenType.IDENTIFIER) {
+                        error(bundle.get("diag.miss-ident-as-param")).label(lookAhead(0))
+                    }?.let {
+                        val expr = annotation(Expr.Identifier(it))
+                        isSeparatorOptional = expr !is Expr.Annotation
+                        return@let expr
+                    }
+                },
+                EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
+                { isSeparatorOptional },
+                {
+                    error(bundle.get("diag.miss-param-separator"))
+                        .label(lookAhead(0))
+                        .label(lParen, bundle.get("diag.param-start"))
+                },
+                TokenType.RPAREN,
+                true,
+                {
+                    error(bundle.get("diag.miss-param-end"))
+                        .label(lookAhead(0))
+                        .label(lParen, bundle.get("diag.param-start"))
                 }
-            },
-            EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
-            { isSeparatorOptional },
-            {
-                error(bundle.get("diag.miss-param-separator"))
-                    .label(lookAhead(0))
-                    .label(lParen, bundle.get("diag.param-start"))
-            },
-            TokenType.RPAREN,
-            true,
-            {
-                error(bundle.get("diag.miss-param-end"))
-                    .label(lookAhead(0))
-                    .label(lParen, bundle.get("diag.param-start"))
-            }
-        )
+            )
+        }
 
         val results = Seq<Expr>(3)
         if (check(TokenType.ARROW) || check(TokenType.COLON)) {
