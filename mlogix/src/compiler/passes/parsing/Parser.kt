@@ -851,7 +851,8 @@ class Parser(
             }
             return Expr.Identifier(id)
         }
-        error(bundle.get("diag.miss-expression")).label(lookAhead(0), "")
+        error(bundle.format("diag.miss-expression", lookAhead(0).type))
+            .label(lookAhead(0), "")
         return ErrorExpr(next().span)
     }
 
