@@ -31,7 +31,7 @@ Big picture architecture
 - This repo is a small language front-end (lexer → parser → AST → semantic analysis → problem reporting).
 - Runtime/entrypoint: `../../MLogiX/src/mlogix/Main.java` — interprets CLI args and calls `Compiler`.
 - Compiler orchestration: `../../MLogiX/src/mlogix/compiler/Compiler.kt` — creates `Lexer`, `Parser`, `DiagManager`,
-  `SourceMap`, builds a `CompilationPipeline` and runs per-file phases. Treat it as the canonical pipeline when
+  `SourceMap`, builds a `Pipeline` and runs per-file phases. Treat it as the canonical pipeline when
   adding features.
 - Pass pipeline: `../../MLogiX/src/mlogix/compiler/pipeline/CompilationPipeline.kt` runs an ordered list of `CompilerPass` (contract
   in `../../MLogiX/src/mlogix/compiler/core/pass/CompilerPass.kt`, ids in `PassId.kt`). Passes communicate via IR data and a shared

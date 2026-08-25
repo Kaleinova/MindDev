@@ -3,6 +3,7 @@ package mlogix
 import arc.files.Fi
 import arc.util.I18NBundle
 import mlogix.compiler.Compiler
+import mlogix.compiler.core.CompilerConfig
 import mlogix.util.I18N
 import mlogix.util.Log
 
@@ -14,6 +15,10 @@ object Main {
             return
         }
 
+        // 获取当前工作目录
+        val projectDirectory = Fi.get(System.getProperty("user.dir"))
+        initI18N(projectDirectory)
+
         if (args.size >= 2) {
             when (args[1]) {
                 "d" -> Log.setLevel(Log.LogType.DEBUG)
@@ -21,17 +26,13 @@ object Main {
         }
 
         when (args[0]) {
-            "c" -> compile()
+            "c" -> compile(projectDirectory)
         }
     }
 
-    fun compile() {
-        val projectDirectory = Fi.get(System.getProperty("user.dir"))
-        initI18N(projectDirectory)
-
-        // 获取当前工作目录
-
-        val compiler = Compiler(projectDirectory)
+    fun compile(projectDirectory: Fi) {
+        val config = CompilerConfig()
+        val compiler = Compiler(projectDirectory, config)
         val result = compiler.compile()
     }
 

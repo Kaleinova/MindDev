@@ -5,39 +5,32 @@ import arc.struct.ArrayMap
 import arc.struct.ObjectMap
 import arc.struct.Seq
 import mlogix.compiler.ast.ASTPrinter
+import mlogix.compiler.core.CompilationMode
 import mlogix.compiler.core.CompilerConfig
 import mlogix.compiler.core.SourceMap
 import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.token.Token
 import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.ir.ResolutionResult
 import mlogix.compiler.passes.parsing.Lexer
 import mlogix.compiler.passes.parsing.Parser
 import mlogix.compiler.passes.parsing.ParsingPass
+import mlogix.compiler.passes.parsing.TokenizationPass
 import mlogix.compiler.passes.resolution.ResolutionPass
 import mlogix.compiler.passes.resolution.Resolver
 import mlogix.compiler.passes.typing.TypeInferencePass
 import mlogix.compiler.passes.typing.TypeInferencer
 import mlogix.compiler.pipeline.CompilationContext
-import mlogix.compiler.pipeline.CompilationPipeline
+import mlogix.compiler.pipeline.Pipeline
 import mlogix.util.Log
 import java.io.IOException
 
-class Compiler(projectPath: Fi) {
+class Compiler(projectPath: Fi, private val config: CompilerConfig) {
     private val manager: SourceMap = SourceMap(projectPath)
     private val diagHandler: DiagHandler = DiagHandler(manager)
-    private val config: CompilerConfig = CompilerConfig()
 
     fun compile(): Boolean {
         val timer = PhaseTimer()
-
-        // 构建编译管道（词法+语法 -> 名称解析 -> 类型推断；未来在此追加 Desugar / Dataflow / Exhaustiveness 等 Pass）
-        val pipeline = CompilationPipeline(
-            Seq.with(
-                ParsingPass(Parser(Lexer(diagHandler), diagHandler)),
-                ResolutionPass(Resolver(diagHandler)),
-                TypeInferencePass(TypeInferencer(diagHandler)),
-            )
-        )
 
         // 遍历项目树
         try {
@@ -53,17 +46,24 @@ class Compiler(projectPath: Fi) {
                 }
                 if (sourceFile.source.isEmpty()) return@walk
 
-                // ---------- 编译管道（词法+语法分析 + 名称解析 + 类型推断等 Pass） ----------
                 timer.startPhase("编译管道")
                 val context = CompilationContext(diagHandler, sourceFile, config)
-                val result = pipeline.run(sourceFile, context) as ResolutionResult
+                when (config.mode) {
+                    CompilationMode.ALL -> {
+                        val pipeline: Pipeline<SourceFile, ResolutionResult> =
+                            Pipeline.from(ParsingPass(Parser(Lexer(diagHandler), diagHandler)))
+                                .then(Pipeline.from(ResolutionPass(Resolver(diagHandler))))
+                                .then(Pipeline.from(TypeInferencePass(TypeInferencer(diagHandler))))
+
+                        val result = pipeline.execute(sourceFile, context) // 类型为 ResolutionResult
+                        if (Log.isAllowed(Log.LogType.DEBUG)) {
+                            ASTPrinter.print(result.ast, sourceFile)
+                            println()
+                        }
+                    }
+                }
                 timer.endPhase()
 
-                // ---------- 输出报告 ----------
-                if (Log.isAllowed(Log.LogType.DEBUG)) {
-                    ASTPrinter.print(result.ast, sourceFile)
-                    println()
-                }
                 diagHandler.printError()
                 diagHandler.printWarning()
             }
