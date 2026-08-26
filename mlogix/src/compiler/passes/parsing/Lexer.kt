@@ -28,6 +28,9 @@ class Lexer(private val problems: DiagHandler) {
 
     private var isPrevNewline: Boolean = false
 
+    /** 上一个token是否为普通注释（可忽略）且该注释在NEWLINE之后 */
+    private var isPrevCommentAfterNewline: Boolean = false
+
     private val recoverTerminators: Set<Char> = setOf(
         ' ', '\n', '\r', ':', ';', ',', '.', '(', ')', '[', ']', '{', '}'
     )
@@ -75,14 +78,36 @@ class Lexer(private val problems: DiagHandler) {
             start = current
 
             if (this.isAtEnd) return eofToken()
-            if (isPrevNewline) {
-                isPrevNewline = false
-                recover { c: Char? -> c != '\n' } // 跳过newline防止重复出现
-                if (this.isAtEnd) return eofToken()
-                start = current
+
+            val c = advance()
+            if (c == '#') {
+                val r = comment()
+                if (r != null) {
+                    isPrevNewline = false
+                    isPrevCommentAfterNewline = false
+                    // docComment不忽略
+                    return r
+                } else {
+                    if (isPrevNewline) isPrevCommentAfterNewline = true
+                    // 普通comment忽略
+                    continue
+                }
+            }
+            if (c == '\r') {
+                match('\n')
+                if (isPrevNewline || isPrevCommentAfterNewline) continue
+                isPrevNewline = true
+                return token(TokenType.NEWLINE)
+            } else if (c == '\n') {
+                if (isPrevNewline || isPrevCommentAfterNewline) continue
+                isPrevNewline = true
+                return token(TokenType.NEWLINE)
             }
 
-            when (val c = advance()) {
+            isPrevNewline = false
+            isPrevCommentAfterNewline = false
+
+            when (c) {
                 '+' -> return if (match('+')) {
                     token(TokenType.PLUS_PLUS)
                 } else if (match('=')) {
@@ -314,26 +339,6 @@ class Lexer(private val problems: DiagHandler) {
                 '”' -> {
                     reportConfusedChar('”', start)
                     return string()
-                }
-
-                '#' -> {
-                    val r = comment()
-                    if (r != null) {
-                        return r
-                    } else {
-                        continue
-                    }
-                }
-
-                '\r' -> {
-                    isPrevNewline = true
-                    match('\n')
-                    return token(TokenType.NEWLINE)
-                }
-
-                '\n' -> {
-                    isPrevNewline = true
-                    return token(TokenType.NEWLINE)
                 }
 
                 ' ', '\t', '\uFEFF' -> continue
@@ -815,16 +820,22 @@ class Lexer(private val problems: DiagHandler) {
     private fun span(from: Int, to: Int): Span = Span.between(sourceFile.index, from, to)
 
     fun createSnapshot(): LexerSnapshot {
-        return LexerSnapshot(start, current, isPrevNewline)
+        return LexerSnapshot(start, current, isPrevNewline, isPrevCommentAfterNewline)
     }
 
     fun restoreSnapshot(snapshot: LexerSnapshot) {
         start = snapshot.start
         current = snapshot.current
         isPrevNewline = snapshot.isPrevNewline
+        isPrevCommentAfterNewline = snapshot.isPrevCommentAfterNewline
     }
 
-    data class LexerSnapshot(val start: Int, val current: Int, val isPrevNewline: Boolean)
+    data class LexerSnapshot(
+        val start: Int,
+        val current: Int,
+        val isPrevNewline: Boolean,
+        val isPrevCommentAfterNewline: Boolean
+    )
 
     companion object {
         val confusedChars = mapOf(
