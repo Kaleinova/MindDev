@@ -61,7 +61,7 @@ class SourceMap(/* 项目根目录 */val projectPath: Fi) {
         constructor(source: String) {
             this.filePath = null
             this.relativePath = "src"
-            this.source = loadSource(source)
+            this.source = source
             this.lineOffsetList = buildLineOffsetList()
             this.index = 0
         }
@@ -71,14 +71,7 @@ class SourceMap(/* 项目根目录 */val projectPath: Fi) {
          */
         @Throws(IOException::class)
         private fun loadSource(filePath: Fi): String {
-            return loadSource(filePath.readString()) // Java 11+ 直接读取为UTF-8字符串
-        }
-
-        /**
-         * 从字符串加载字符列表
-         */
-        private fun loadSource(source: String): String {
-            return source.replace("\r\n", "\n").replace('\r', '\n')
+            return filePath.readString()
         }
 
         /**
@@ -207,7 +200,7 @@ class SourceMap(/* 项目根目录 */val projectPath: Fi) {
             if (line == lineOffsetList.size - 1) {
                 return subString(lineOffsetList[line], source.length)
             }
-            return subString(lineOffsetList[line], lineOffsetList[line + 1] - 1)
+            return subString(lineOffsetList[line], lineOffsetList[line + 1])
                 .dropLastWhile { it == '\n' || it == '\r' }
         }
 
