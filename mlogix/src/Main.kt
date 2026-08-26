@@ -17,8 +17,10 @@ object Main {
         }
 
         // 获取当前工作目录
-        val projectDirectory = Fi.get(System.getProperty("user.dir"))
-        initI18N(projectDirectory)
+        val userDirectory = Fi.get(System.getProperty("user.dir"))
+        initI18N(userDirectory)
+
+        val projectDirectory = userDirectory.child("mlogix_test")
 
         if (args.size >= 2) {
             when (args[1]) {
