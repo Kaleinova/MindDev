@@ -78,4 +78,13 @@ abstract class Stmt(span: Span) : ASTNode(span) {
     data class AssignStmt(override val span: Span, val `var`: Expr, val operator: Token, val value: Expr) : Stmt(span)
 
     data class SetVarStmt(override val span: Span, val `var`: Expr, val assignStmt: AssignStmt?) : Stmt(span)
+
+    data class StructStmt(
+        override val span: Span,
+        val name: Expr.Identifier,
+        val typeParams: Seq<Expr.Identifier>?,
+        /** 字段**声明** */
+        val fields: Seq<ASTNode>,
+        val methods: Seq<FnStmt>
+    ) : Stmt(span)
 }

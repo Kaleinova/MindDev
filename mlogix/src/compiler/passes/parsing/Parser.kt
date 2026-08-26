@@ -5,6 +5,7 @@ import arc.func.Cons
 import arc.func.Prov
 import arc.struct.Queue
 import arc.struct.Seq
+import mlogix.compiler.ast.ASTNode
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Expr.ErrorExpr
 import mlogix.compiler.ast.Expr.Get
@@ -83,6 +84,7 @@ class Parser(
         check(TokenType.CONTINUE) -> continueStmt()
         check(TokenType.RETURN) -> returnStmt()
         check(TokenType.SET) -> setStmt()
+        check(TokenType.STRUCT) -> structStmt()
 
         else -> {
             loopStmtWithLabel() ?: exprStmt()
@@ -351,7 +353,7 @@ class Parser(
             }
         }
 
-        var parameters : Seq<Expr>? = null
+        var parameters: Seq<Expr>? = null
         if (check(TokenType.LPAREN)) {
             val lParen = next()
 
@@ -488,6 +490,85 @@ class Parser(
             if (assignStmt.value is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return SetVarStmt(between(start, assignStmt), expr, assignStmt)
         }
+    }
+
+    private fun structStmt(): Stmt? {
+        val start = next()
+
+        val name = consume(TokenType.IDENTIFIER) {
+            error(bundle.get("diag.miss-struct-name"))
+                .label(lookAhead(0))
+        }
+        if (name == null) {
+            recoverByTokenTree(TokenType.RECOVERY)
+            return null
+        }
+        val result = typeArgs()
+        var typeParams: Seq<Expr.Identifier>? = null
+        if (result != null) {
+            if (result.remaining != 0) {
+                error(bundle.get("diag.redundant-gt"))
+                    .label(prevToken.span.cutLast(result.remaining))
+            }
+            if (result.args.size != 0) {
+                typeParams = result.args
+            }
+        }
+
+        var end: Token = name
+        val fields = Seq<ASTNode>(6)
+        val methods = Seq<FnStmt>(3)
+        if (check(TokenType.LBRACE)) {
+            end = next()
+            var isCommaOptional = true
+            while (true) {
+                if (check(TokenType.RBRACE)) {
+                    end = next()
+                    break
+                }
+                if (check(TokenType.IDENTIFIER)) {
+                    if (!isCommaOptional) {
+                        error(bundle.get("diag.miss-struct-field-separator"))
+                            .label(lookAhead(0))
+                    }
+                    val id = annotation(Expr.Identifier(next()))
+                    val assign = assignStmt(id)
+                    if (assign == null) {
+                        fields.add(id)
+                        isCommaOptional = match(TokenType.COMMA) || matchStmtEnd()
+                    } else {
+                        if (assign.value is ErrorExpr) {
+                            fields.add(id)
+                            recoverByTokenTree(TokenType.RECOVERY + TokenType.NEWLINE)
+                        } else {
+                            fields.add(assign)
+                        }
+                        isCommaOptional = match(TokenType.COMMA) || matchStmtEnd()
+                    }
+
+                } else if (check(TokenType.FN)) {
+                    methods.add(fnStmt())
+                    isCommaOptional = true
+
+                } else {
+                    error(bundle.get("diag.miss-struct-item"))
+                        .label(lookAhead(0))
+                    when (recoverByTokenTree(TokenType.RECOVERY)) {
+                        TokenType.RBRACE -> return StructStmt(
+                            between(start, next()),
+                            Expr.Identifier(name),
+                            typeParams,
+                            fields,
+                            methods
+                        )
+
+                        TokenType.FN -> methods.add(fnStmt())
+                        else -> break
+                    }
+                }
+            }
+        }
+        return StructStmt(between(start, end), Expr.Identifier(name), typeParams, fields, methods)
     }
 
     private fun exprStmt(): Stmt? {
@@ -760,7 +841,7 @@ class Parser(
                     val args = Seq<Expr>(8)
                     while (true) {
                         if (check(TokenType.RPAREN)) {
-                            expr = Expr.Call(between(expr, next()), expr,  args)
+                            expr = Expr.Call(between(expr, next()), expr, args)
                             break
                         }
                         val innerExpr = expression()

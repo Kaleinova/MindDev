@@ -8,7 +8,7 @@ enum class TokenType(private val keyword: String? = null) {
     SET("set"), MACRO("macro"), CONST("const"),
     IF("if"), ELIF("elif"), ELSE("else"),
     FOR("for"), WHILE("while"), BREAK("break"), CONTINUE("continue"),
-    STRUCT("struct"),
+    STRUCT("struct"), TRAIT("trait"), IMPL("impl"),
     MATCH("match"),
     FN("fn"), RETURN("return"),
     ENUM("enum"),
