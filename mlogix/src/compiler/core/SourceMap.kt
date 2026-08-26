@@ -204,6 +204,17 @@ class SourceMap(/* 项目根目录 */val projectPath: Fi) {
                 .dropLastWhile { it == '\n' || it == '\r' }
         }
 
+        /**
+         * 跟据行号(从0开始)获取一行字符串
+         */
+        fun getLineStringWithNewline(line: Int): String {
+            // 最后一行
+            if (line == lineOffsetList.size - 1) {
+                return subString(lineOffsetList[line], source.length)
+            }
+            return subString(lineOffsetList[line], lineOffsetList[line + 1])
+        }
+
         fun length(): Int {
             return source.length
         }

@@ -761,20 +761,6 @@ class Lexer(private val problems: DiagHandler) {
     private fun token(type: TokenType, literal: Any? = null): Token {
         val span = Span.between(sourceFile.index, start, current)
 
-//        if (Log.isAllowed(Log.LogType.DEBUG)) {
-//            val lineAndCol: IntArray? = sourceFile.getLineAndCol(start)
-//            Log.debug(
-//                start.toString() + Ansi.CYAN + "┃"
-//                        + Ansi.DEFAULT + "(" + lineAndCol!![0] + "," + lineAndCol[1] + ")" + Ansi.CYAN + "┃"
-//                        + Ansi.DEFAULT + type.toString() + Ansi.CYAN + "┃"
-//                        + Ansi.DEFAULT + sourceFile.subString(
-//                    start,
-//                    current
-//                ) + (if (literal == null) "" else (Ansi.CYAN + "┃"
-//                        + Ansi.DEFAULT + literal))
-//            )
-//        }
-
         return Token(span, type, literal)
     }
 
@@ -782,16 +768,6 @@ class Lexer(private val problems: DiagHandler) {
     private fun eofToken(): Token {
         // 特化部分:current -> start
         val span = Span.between(sourceFile.index, start, current)
-
-//        if (Log.isAllowed(Log.LogType.DEBUG)) {
-//            val lineAndCol = sourceFile.getLineAndCol(start)
-//            Log.debug(
-//                (start.toString() + Ansi.CYAN + "┃"
-//                        + Ansi.DEFAULT + "(" + lineAndCol[0] + "," + lineAndCol[1] + ")" + Ansi.CYAN + "┃"
-//                        + Ansi.DEFAULT + TokenType.EOF.name + Ansi.CYAN + "┃"
-//                        + Ansi.DEFAULT)
-//            )
-//        }
 
         return Token(span, TokenType.EOF, null)
     }

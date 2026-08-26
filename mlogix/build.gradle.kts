@@ -77,3 +77,16 @@ tasks.register<JavaExec>("compile-debug") {
         }
     }
 }
+
+tasks.register<JavaExec>("tokenize-debug") {
+    classpath = sourceSets.main.get().runtimeClasspath + configurations["debugRuntime"]
+    mainClass = "mlogix.Main"
+    args("t", "d")
+    isIgnoreExitValue = true
+    errorOutput = System.err
+    doLast {
+        if (executionResult.get().exitValue != 0) {
+            println("程序执行失败，退出码: ${executionResult.get().exitValue}")
+        }
+    }
+}

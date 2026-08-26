@@ -10,6 +10,7 @@ import mlogix.compiler.core.CompilerConfig
 import mlogix.compiler.core.SourceMap
 import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.token.Token
+import mlogix.compiler.core.token.TokenPrinter
 import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.ir.ResolutionResult
 import mlogix.compiler.passes.parsing.Lexer
@@ -67,6 +68,7 @@ class Compiler(projectPath: Fi, private val config: CompilerConfig) {
                             Pipeline.from(TokenizationPass(Lexer(diagHandler)))
 
                         val tokens = pipeline.execute(sourceFile, context) // 类型为 Seq<Token>
+                        TokenPrinter.print(tokens, sourceFile)
                     }
                 }
                 timer.endPhase()
