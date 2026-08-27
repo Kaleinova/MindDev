@@ -5,8 +5,8 @@ import arc.struct.Seq
 import mlogix.compiler.ast.ASTPrinter
 import mlogix.compiler.core.CompilationMode
 import mlogix.compiler.core.CompilerConfig
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.SourceMap
-import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenPrinter
 import mlogix.compiler.diagnostic.DiagHandler

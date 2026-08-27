@@ -12,7 +12,7 @@ import mlogix.compiler.ast.Expr.Get
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.ast.Stmt.*
 import mlogix.compiler.core.CompilerContext
-import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
 import mlogix.compiler.core.token.Token
@@ -40,19 +40,6 @@ class Parser(
      */
     fun parse(sourceFile: SourceFile): Stmt {
         this.sourceFile = sourceFile
-        lexer.reset(sourceFile)
-        input = InputWindow()
-        return program()
-    }
-
-    /**
-     * 解析独立文本语法
-     * 运行前会重置problemCollector
-     */
-    fun parse(source: String): Stmt {
-        context.diagHandler.clear()
-
-        sourceFile = SourceFile(source)
         lexer.reset(sourceFile)
         input = InputWindow()
         return program()

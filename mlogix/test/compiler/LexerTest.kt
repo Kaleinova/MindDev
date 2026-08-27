@@ -5,20 +5,23 @@ import arc.graphics.Color
 import arc.graphics.Colors
 import arc.struct.Seq
 import arc.util.I18NBundle.createBundle
+import mlogix.compiler.core.CompilerConfig
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.core.token.TokenType.*
 import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.passes.parsing.Lexer
+import mlogix.compiler.pipeline.CompilationContext
 import mlogix.util.I18N
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 class LexerTest {
-    val diagHandler = DiagHandler()
-    val lexer = Lexer(diagHandler)
+    val context = CompilationContext(DiagHandler(), CompilerConfig())
+    val lexer = Lexer(context)
 
     companion object {
         @BeforeAll
@@ -29,10 +32,16 @@ class LexerTest {
         }
     }
 
+    private fun tokenize(source: String): Seq<Token> {
+        context.diagHandler.clear()
+        val sourceFile = SourceFile(source)
+        return lexer.tokenize(sourceFile)
+    }
+
     @Test
     fun `tokenize simple arithmetic expression`() {
         val source = "3 + 5 * 2"
-        val tokens = lexer.tokenize(source)
+        val tokens = tokenize(source)
 
         val expected = Seq.with(
             token(INT, 3.0),
@@ -48,7 +57,7 @@ class LexerTest {
     fun `tokenize operators and separators`() {
         val source =
             "+ - * / ** % %% // & | ^ << >> >>> ~ ++ -- = == != === !== < > <= >= && || ! : := :< -> ; , . ( ) [ ] { }"
-        val tokens = lexer.tokenize(source)
+        val tokens = tokenize(source)
 
         val expected = Seq.with(
             token(PLUS),
@@ -101,71 +110,71 @@ class LexerTest {
     @Test
     fun `tokenize ints`() {
         // 整数底层使用Double，契合Logic的底层
-        assertEquals(intSeq(123.0), lexer.tokenize("123"))
-        assertEquals(intSeq(123.0), lexer.tokenize("1_23"))
+        assertEquals(intSeq(123.0), tokenize("123"))
+        assertEquals(intSeq(123.0), tokenize("1_23"))
     }
 
     @Test
     fun `tokenize nums`() {
-        assertEquals(numSeq(123.0), lexer.tokenize("123."))
-        assertEquals(numSeq(123.123), lexer.tokenize("123.123"))
-        assertEquals(numSeq(123e12), lexer.tokenize("123e12"))
-        assertEquals(numSeq(123.123e12), lexer.tokenize("123.123e12"))
-        assertEquals(numSeq(123.123e-12), lexer.tokenize("123.123e-12"))
+        assertEquals(numSeq(123.0), tokenize("123."))
+        assertEquals(numSeq(123.123), tokenize("123.123"))
+        assertEquals(numSeq(123e12), tokenize("123e12"))
+        assertEquals(numSeq(123.123e12), tokenize("123.123e12"))
+        assertEquals(numSeq(123.123e-12), tokenize("123.123e-12"))
 
         // 加入分隔符
-        assertEquals(numSeq(123.0), lexer.tokenize("1_23."))
-        assertEquals(numSeq(123.123), lexer.tokenize("12_3.12_3"))
-        assertEquals(numSeq(123e12), lexer.tokenize("12_3e1_2"))
-        assertEquals(numSeq(123.123e12), lexer.tokenize("1_23.1_23e1_2"))
-        assertEquals(numSeq(123.123e-12), lexer.tokenize("1_23.1_23e-1_2"))
+        assertEquals(numSeq(123.0), tokenize("1_23."))
+        assertEquals(numSeq(123.123), tokenize("12_3.12_3"))
+        assertEquals(numSeq(123e12), tokenize("12_3e1_2"))
+        assertEquals(numSeq(123.123e12), tokenize("1_23.1_23e1_2"))
+        assertEquals(numSeq(123.123e-12), tokenize("1_23.1_23e-1_2"))
     }
 
     @Test
     fun `tokenize colors`() {
         assertEquals(
             Seq.with(Colors.get("red").let { colSeq(Color.toDoubleBits(it.r, it.g, it.b, it.a)) }),
-            lexer.tokenize("0%red")
+            tokenize("0%red")
         )
         assertEquals(
             Seq.with(Colors.get("RED").let { colSeq(Color.toDoubleBits(it.r, it.g, it.b, it.a)) }),
-            lexer.tokenize("0%RED")
+            tokenize("0%RED")
         )
         assertEquals(
             Seq.with(Colors.get("DARK_GRAY").let { colSeq(Color.toDoubleBits(it.r, it.g, it.b, it.a)) }),
-            lexer.tokenize("0%DARK_GRAY")
+            tokenize("0%DARK_GRAY")
         )
         assertEquals(
             Seq.with(Colors.get("darkgray").let { colSeq(Color.toDoubleBits(it.r, it.g, it.b, it.a)) }),
-            lexer.tokenize("0%darkgray")
+            tokenize("0%darkgray")
         )
 
         assertEquals(
             colSeq(Color.toDoubleBits(0xff, 0x7f, 0x10, 0xff)),
-            lexer.tokenize("0%ff7f10")
+            tokenize("0%ff7f10")
         )
         assertEquals(
             colSeq(Color.toDoubleBits(0xff, 0x7f, 0x10, 0x30)),
-            lexer.tokenize("0%ff7f1030")
+            tokenize("0%ff7f1030")
         )
         assertEquals(
             colSeq(Color.toDoubleBits(0xff, 0x7f, 0x10, 0xff)),
-            lexer.tokenize("0%FF7F10")
+            tokenize("0%FF7F10")
         )
         assertEquals(
             colSeq(Color.toDoubleBits(0xff, 0x7f, 0x10, 0x30)),
-            lexer.tokenize("0%FF7F1030")
+            tokenize("0%FF7F1030")
         )
     }
 
     @Test
     fun `tokenize strings`() {
-        assertEquals(strSeq("hello world"), lexer.tokenize("\"hello world\""))
-        assertEquals(strSeq("hello \\nworld"), lexer.tokenize("\"hello \\nworld\""))
+        assertEquals(strSeq("hello world"), tokenize("\"hello world\""))
+        assertEquals(strSeq("hello \\nworld"), tokenize("\"hello \\nworld\""))
 
         // 使用全角符号不合法但是结果也得对
-        assertEquals(strSeq("hello world"), lexer.tokenize("“hello world”"))
-        assertEquals(strSeq("hello \\nworld"), lexer.tokenize("“hello \\nworld”"))
+        assertEquals(strSeq("hello world"), tokenize("“hello world”"))
+        assertEquals(strSeq("hello \\nworld"), tokenize("“hello \\nworld”"))
     }
 
     private fun token(type: TokenType, literal: Any? = null): Token {

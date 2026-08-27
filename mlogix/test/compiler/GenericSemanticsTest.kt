@@ -2,12 +2,14 @@ package mlogix.compiler
 
 import arc.files.Fi
 import arc.util.I18NBundle.createBundle
-import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.CompilerConfig
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.passes.parsing.Lexer
 import mlogix.compiler.passes.parsing.Parser
 import mlogix.compiler.passes.resolution.Resolver
 import mlogix.compiler.passes.typing.TypeInferencer
+import mlogix.compiler.pipeline.CompilationContext
 import mlogix.util.I18N
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeAll
@@ -18,11 +20,11 @@ import org.junit.jupiter.api.Test
  * 解析 → 名称解析 → 类型推断，断言错误数。
  */
 class GenericSemanticsTest {
-    private val problems = DiagHandler()
-    private val lexer = Lexer(problems)
-    private val parser = Parser(lexer, problems)
-    private val resolver = Resolver(problems)
-    private val inferencer = TypeInferencer(problems)
+    private val context = CompilationContext(DiagHandler(), CompilerConfig())
+    private val lexer = Lexer(context)
+    private val parser = Parser(lexer, context)
+    private val resolver = Resolver(context)
+    private val inferencer = TypeInferencer(context)
 
     companion object {
         @BeforeAll
@@ -35,11 +37,12 @@ class GenericSemanticsTest {
 
     /** 解析 → 名称解析 → 类型推断，返回推断后的错误数（parser.parse 会先清空诊断） */
     private fun analyze(source: String): Int {
-        val ast = parser.parse(source)
+        context.diagHandler.clear()
         val sourceFile = SourceFile(source)
+        val ast = parser.parse(sourceFile)
         val result = resolver.resolve(ast, sourceFile)
         inferencer.analyze(result, sourceFile)
-        return problems.errorNum()
+        return context.diagHandler.errorNum()
     }
 
     // ========== 正例：0 错误 ==========

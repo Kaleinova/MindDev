@@ -1,7 +1,7 @@
 package mlogix.compiler.core.pass
 
 import mlogix.compiler.core.CompilerContext
-import mlogix.compiler.core.SourceMap
+import mlogix.compiler.core.SourceFile
 
 /**
  * 编译通行证（Pass）契约。
@@ -28,6 +28,6 @@ interface CompilerPass<in I, out O> {
      * 注意：Pass 内部不抛异常中断管道；错误一律通过 [CompilerContext.diagHandler] 报告。
      * 管道继续运行，即使出现错误，也带上 ErrorType/ErrorExpr 继续。
      */
-    fun execute(input: I, sourceFile: SourceMap.SourceFile): O
+    fun execute(input: I, sourceFile: SourceFile): O
 }
 

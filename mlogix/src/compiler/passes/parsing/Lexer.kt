@@ -5,7 +5,7 @@ import arc.graphics.Color
 import arc.graphics.Colors
 import arc.struct.Seq
 import mlogix.compiler.core.CompilerContext
-import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
@@ -50,12 +50,8 @@ class Lexer(private val context: CompilerContext) {
 
     /**
      * 解析独立文本为token序列
-     * 运行前会重置problemCollector
      */
-    fun tokenize(source: String): Seq<Token> {
-        context.diagHandler.clear()
-
-        val sourceFile = SourceFile(source)
+    fun tokenize(sourceFile: SourceFile): Seq<Token> {
         reset(sourceFile)
         val tokens = Seq<Token>()
         while (true) {

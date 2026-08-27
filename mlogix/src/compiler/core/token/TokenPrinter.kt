@@ -1,12 +1,12 @@
 package mlogix.compiler.core.token
 
 import arc.struct.Seq
-import mlogix.compiler.core.SourceMap
+import mlogix.compiler.core.SourceFile
 import mlogix.util.Ansi
 import kotlin.math.max
 
 object TokenPrinter {
-    fun print(tokens: Seq<Token>, sourceFile: SourceMap.SourceFile) {
+    fun print(tokens: Seq<Token>, sourceFile: SourceFile) {
         var maxLineNumLen = 1
         var maxTypeStrLen = 0
         var maxLiteralStrLen = 0

@@ -3,8 +3,8 @@ package mlogix.compiler.diagnostic
 import arc.struct.IntIntMap
 import arc.struct.IntSeq
 import arc.struct.Seq
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.SourceMap
-import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
 import mlogix.util.Ansi
@@ -366,11 +366,13 @@ abstract class Diagnostic(
                     LabelStyle.Replace -> {
                         append(" ".repeat(maxLineStrLen - lineNumStr.length))
                         append(Ansi.RED + lineNumStr + " - " + Ansi.DEFAULT)
-                        append(lineString.replaceRange(
-                            col,
-                            col + markLen(file, label.span),
-                            Ansi.B_RED + lineString.substring(col, col + markLen(file, label.span)) + Ansi.DEFAULT,
-                        ) + "\n")
+                        append(
+                            lineString.replaceRange(
+                                col,
+                                col + markLen(file, label.span),
+                                Ansi.B_RED + lineString.substring(col, col + markLen(file, label.span)) + Ansi.DEFAULT,
+                            ) + "\n"
+                        )
 
                         append(" ".repeat(maxLineStrLen - lineNumStr.length))
                         append(Ansi.GREEN + lineNumStr + " + " + Ansi.DEFAULT)

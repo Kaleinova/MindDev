@@ -1,6 +1,6 @@
 package mlogix.compiler.passes.typing
 
-import mlogix.compiler.core.SourceMap
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.pass.CompilerPass
 import mlogix.compiler.core.pass.PassId
 import mlogix.compiler.ir.ResolutionResult
@@ -20,7 +20,7 @@ class TypeInferencePass(
 
     override val dependencies: Set<PassId> = emptySet()
 
-    override fun execute(input: ResolutionResult, sourceFile: SourceMap.SourceFile): ResolutionResult {
+    override fun execute(input: ResolutionResult, sourceFile: SourceFile): ResolutionResult {
         inferencer.analyze(input, sourceFile)
         return input
     }

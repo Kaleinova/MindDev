@@ -1,7 +1,7 @@
 package mlogix.compiler.passes.parsing
 
 import mlogix.compiler.ast.Stmt
-import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.pass.CompilerPass
 import mlogix.compiler.core.pass.PassId
 

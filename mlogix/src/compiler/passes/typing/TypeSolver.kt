@@ -3,7 +3,7 @@ package mlogix.compiler.passes.typing
 import arc.struct.IntMap
 import arc.struct.ObjectMap
 import arc.struct.Seq
-import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type

@@ -1,6 +1,6 @@
 package mlogix.compiler.pipeline
 
-import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.pass.CompilerPass
 
 /**

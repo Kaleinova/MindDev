@@ -6,7 +6,7 @@ import arc.struct.Seq
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.CompilerContext
-import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.symbol.DefId
 import mlogix.compiler.core.symbol.Symbol
@@ -172,7 +172,7 @@ class TypeInferencer(val context: CompilerContext) {
 
             is Stmt.ReturnStmt -> {
                 val exprR = stmt.expr?.let { inferExpr(it) }
-                exprR?.let {constraints.addAll(it.constraints) }
+                exprR?.let { constraints.addAll(it.constraints) }
                 if (!returnContextStack.isEmpty) {
                     val context = returnContextStack.peek()
                     val returnType = exprR?.type ?: BuiltinType.Null
@@ -692,6 +692,7 @@ class TypeInferencer(val context: CompilerContext) {
             symbol.type == BuiltinType.Array ->
                 // 裸 `Array`：宽松视为 `Array<Unknown>`
                 Type.App(BuiltinType.Array, Seq.with(solver.freshVar()))
+
             else -> symbol.type
         }
     }

@@ -4,7 +4,7 @@ import arc.struct.Seq
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.CompilerContext
-import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.symbol.DefId
 import mlogix.compiler.core.symbol.Scope

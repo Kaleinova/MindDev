@@ -5,25 +5,27 @@ import arc.struct.Seq
 import arc.util.I18NBundle.createBundle
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Stmt
+import mlogix.compiler.core.CompilerConfig
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.passes.parsing.Lexer
 import mlogix.compiler.passes.parsing.Parser
+import mlogix.compiler.pipeline.CompilationContext
 import mlogix.util.I18N
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 class ParserTest {
-    val problems = DiagHandler()
-    val lexer = Lexer(problems)
-    val parser = Parser(lexer, problems)
-
-    val span = Span(0, 0, 0)
+    val context = CompilationContext(DiagHandler(), CompilerConfig())
+    val parser = Parser(Lexer(context), context)
 
     companion object {
+        val span = Span(0, 0, 0)
+
         @BeforeAll
         @JvmStatic
         fun init() {
@@ -32,9 +34,15 @@ class ParserTest {
         }
     }
 
+    private fun parse(source: String): Stmt {
+        context.diagHandler.clear()
+        val sourceFile = SourceFile(source)
+        return parser.parse(sourceFile)
+    }
+
     @Test
     fun `parse correct AST for addition`() {
-        val ast = parser.parse("2 + 3")
+        val ast = parse("2 + 3")
         assertEquals(
             ast,
             Stmt.ExprStmt(
@@ -51,7 +59,7 @@ class ParserTest {
 
     @Test
     fun `parse set assignment`() {
-        val ast = parser.parse("set a = 1")
+        val ast = parse("set a = 1")
 
         val varExpr = Expr.Identifier(token(TokenType.IDENTIFIER, "a"))
         val assign = Stmt.AssignStmt(
@@ -66,7 +74,7 @@ class ParserTest {
 
     @Test
     fun `parse if else`() {
-        val ast = parser.parse("if 1 { 2 } else { 3 }")
+        val ast = parse("if 1 { 2 } else { 3 }")
 
         val condition = Expr.Literal(token(TokenType.INT, 1.0))
         val thenBranch = Stmt.BlockStmt(span, Seq.with(Stmt.ExprStmt(span, Expr.Literal(token(TokenType.INT, 2.0)))))
@@ -78,7 +86,7 @@ class ParserTest {
 
     @Test
     fun `parse for`() {
-        val ast = parser.parse("loop: for i in 1:<links { print(i) }")
+        val ast = parse("loop: for i in 1:<links { print(i) }")
 
         val flag = Expr.Identifier(token(TokenType.IDENTIFIER, "loop"))
         val varDecl = Expr.Identifier(token(TokenType.IDENTIFIER, "i"))
@@ -107,7 +115,7 @@ class ParserTest {
 
     @Test
     fun `parse while`() {
-        val ast = parser.parse("loop: while true { continue }")
+        val ast = parse("loop: while true { continue }")
         val expectedWhile = Stmt.WhileStmt(
             span,
             Expr.Identifier(token(TokenType.IDENTIFIER, "loop")),
@@ -119,7 +127,7 @@ class ParserTest {
 
     @Test
     fun `parse function declaration`() {
-        val ast = parser.parse("fn add(a:?(Num Str), b:d) -> r : ?(Num Int), msg : Str { return a + b }")
+        val ast = parse("fn add(a:?(Num Str), b:d) -> r : ?(Num Int), msg : Str { return a + b }")
 
         val name = token(TokenType.IDENTIFIER, "add")
         val aParam = Expr.Annotation(
@@ -176,7 +184,7 @@ class ParserTest {
 
     @Test
     fun `parse function call`() {
-        val ast = parser.parse("add(1, 2)")
+        val ast = parse("add(1, 2)")
         val call = Expr.Call(
             span, Expr.Identifier(token(TokenType.IDENTIFIER, "add")), Seq.with(
                 Expr.Literal(token(TokenType.INT, 1.0)), Expr.Literal(token(TokenType.INT, 2.0))
@@ -187,7 +195,7 @@ class ParserTest {
 
     @Test
     fun `parse set with annotation and array literal`() {
-        val ast = parser.parse("set a : Int = {1, 2}")
+        val ast = parse("set a : Int = {1, 2}")
 
         val varExpr = Expr.Annotation(
             Expr.Identifier(token(TokenType.IDENTIFIER, "a")),
@@ -205,7 +213,7 @@ class ParserTest {
 
     @Test
     fun `parse match`() {
-        val ast = parser.parse("match 1 { 1 -> { break } }")
+        val ast = parse("match 1 { 1 -> { break } }")
         val matchBranchBody = Stmt.BlockStmt(span, Seq.with(Stmt.BreakStmt(span, null)))
         val branch = Stmt.MatchStmt.MatchBranch(span, Expr.Literal(token(TokenType.INT, 1.0)), matchBranchBody)
         val expectedMatch = Stmt.MatchStmt(span, Expr.Literal(token(TokenType.INT, 1.0)), Seq.with(branch))

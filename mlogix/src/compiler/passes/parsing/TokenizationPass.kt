@@ -1,7 +1,7 @@
 package mlogix.compiler.passes.parsing
 
 import arc.struct.Seq
-import mlogix.compiler.core.SourceMap.SourceFile
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.pass.CompilerPass
 import mlogix.compiler.core.pass.PassId
 import mlogix.compiler.core.token.Token
@@ -21,6 +21,6 @@ class TokenizationPass(
     override val dependencies: Set<PassId> = emptySet()
 
     override fun execute(input: SourceFile, sourceFile: SourceFile): Seq<Token> {
-        return lexer.tokenize(input.source)
+        return lexer.tokenize(input)
     }
 }

@@ -1,13 +1,13 @@
 package mlogix.compiler.ast
 
 import arc.struct.Seq
-import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.ast.Stmt.MatchStmt.MatchBranch
 import mlogix.compiler.ast.Stmt.UseStmt.UseItem
-import mlogix.compiler.core.token.Token
+import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
 import mlogix.compiler.core.symbol.DefId
+import mlogix.compiler.core.token.Token
 import mlogix.util.Ansi
 import kotlin.math.max
 
