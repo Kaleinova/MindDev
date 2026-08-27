@@ -1,7 +1,7 @@
 package mlogix.compiler.passes.resolution
 
 import mlogix.compiler.ast.Stmt
-import mlogix.compiler.core.CompilerContext
+import mlogix.compiler.core.SourceMap
 import mlogix.compiler.core.pass.CompilerPass
 import mlogix.compiler.core.pass.PassId
 import mlogix.compiler.ir.ResolutionResult
@@ -20,8 +20,8 @@ class ResolutionPass(
 
     override val dependencies: Set<PassId> = emptySet()
 
-    override fun execute(input: Stmt, context: CompilerContext): ResolutionResult {
-        return resolver.resolve(input, context.sourceFile)
+    override fun execute(input: Stmt, sourceFile: SourceMap.SourceFile): ResolutionResult {
+        return resolver.resolve(input, sourceFile)
     }
 }
 

@@ -1,8 +1,6 @@
 package mlogix.compiler
 
 import arc.files.Fi
-import arc.struct.ArrayMap
-import arc.struct.ObjectMap
 import arc.struct.Seq
 import mlogix.compiler.ast.ASTPrinter
 import mlogix.compiler.core.CompilationMode
@@ -22,66 +20,50 @@ import mlogix.compiler.passes.resolution.Resolver
 import mlogix.compiler.passes.typing.TypeInferencePass
 import mlogix.compiler.passes.typing.TypeInferencer
 import mlogix.compiler.pipeline.CompilationContext
+import mlogix.compiler.pipeline.PhaseTimer
 import mlogix.compiler.pipeline.Pipeline
 import mlogix.util.Log
 import java.io.IOException
 
 class Compiler(projectPath: Fi, private val config: CompilerConfig) {
-    private val manager: SourceMap = SourceMap(projectPath)
-    private val diagHandler: DiagHandler = DiagHandler(manager)
+    private val sourceMap: SourceMap = SourceMap(projectPath)
+    private val context = CompilationContext(DiagHandler(sourceMap), config)
+    private val diagHandler = context.diagHandler
 
     fun compile(): Boolean {
         val timer = PhaseTimer()
+        when (config.mode) {
+            CompilationMode.ALL -> {
+                val pipeline: Pipeline<SourceFile, ResolutionResult> =
+                    Pipeline.from(ParsingPass(Parser(Lexer(context), context)))
+                        .then(Pipeline.from(ResolutionPass(Resolver(context))))
+                        .then(Pipeline.from(TypeInferencePass(TypeInferencer(context))))
 
-        // 遍历项目树
-        try {
-            manager.walk { file ->
-                if (!file.extension().equals("mlx")) return@walk
+                // 遍历
+                walk { sourceFile ->
+                    val result = pipeline.execute(sourceFile, sourceFile, timer) // 类型为 ResolutionResult
 
-                val sourceFile: SourceFile
-                try {
-                    sourceFile = manager.loadSourceMap(file)
-                } catch (e: IOException) {
-                    e.printStackTrace()
-                    return@walk
-                }
-                if (sourceFile.source.isEmpty()) return@walk
-
-                timer.startPhase("编译管道")
-                val context = CompilationContext(diagHandler, sourceFile, config)
-                when (config.mode) {
-                    CompilationMode.ALL -> {
-                        val pipeline: Pipeline<SourceFile, ResolutionResult> =
-                            Pipeline.from(ParsingPass(Parser(Lexer(diagHandler), diagHandler)))
-                                .then(Pipeline.from(ResolutionPass(Resolver(diagHandler))))
-                                .then(Pipeline.from(TypeInferencePass(TypeInferencer(diagHandler))))
-
-                        val result = pipeline.execute(sourceFile, context) // 类型为 ResolutionResult
-                        if (Log.isAllowed(Log.LogType.DEBUG)) {
-                            ASTPrinter.print(result.ast, sourceFile)
-                            println()
-                        }
-                    }
-
-                    CompilationMode.TOKENIZATION -> {
-                        val pipeline: Pipeline<SourceFile, Seq<Token>> =
-                            Pipeline.from(TokenizationPass(Lexer(diagHandler)))
-
-                        val tokens = pipeline.execute(sourceFile, context) // 类型为 Seq<Token>
-                        TokenPrinter.print(tokens, sourceFile)
+                    if (Log.isAllowed(Log.LogType.DEBUG)) {
+                        ASTPrinter.print(result.ast, sourceFile)
+                        println()
                     }
                 }
-                timer.endPhase()
-
-                diagHandler.printError()
-                diagHandler.printWarning()
             }
 
-        } catch (e: IOException) {
-            e.printStackTrace()
+            CompilationMode.TOKENIZATION -> {
+                val pipeline: Pipeline<SourceFile, Seq<Token>> =
+                    Pipeline.from(TokenizationPass(Lexer(context)))
+
+                // 遍历
+                walk { sourceFile ->
+                    val tokens = pipeline.execute(sourceFile, sourceFile, timer) // 类型为 Seq<Token>
+                    TokenPrinter.print(tokens, sourceFile)
+                }
+            }
         }
 
-        timer.printPhaseTimes()
+        diagHandler.printError()
+        diagHandler.printWarning()
 
         if (diagHandler.errorNum() != 0) {
             Log.info(diagHandler.errorNum().toString() + " errors")
@@ -89,6 +71,7 @@ class Compiler(projectPath: Fi, private val config: CompilerConfig) {
         if (diagHandler.warningNum() != 0) {
             Log.info(diagHandler.warningNum().toString() + " warnings")
         }
+        timer.printPhaseTimes()
         if (diagHandler.hasError()) {
             Log.info("编译失败")
             return false
@@ -96,42 +79,29 @@ class Compiler(projectPath: Fi, private val config: CompilerConfig) {
             Log.info("编译成功")
             return true
         }
+
     }
 
-    class PhaseTimer {
-        private val phaseTimeMap = ArrayMap<String, Long>()
-        private var currentPhaseName: String? = null
-        private var phaseStart: Long = 0
+    /** 遍历项目树 */
+    private fun walk(action: (SourceFile) -> Unit) {
+        try {
+            sourceMap.walk { file ->
+                if (!file.extension().equals("mlx")) return@walk
 
-        fun startPhase(phaseName: String) {
-            if (currentPhaseName != null) {
-                endPhase()
-            }
-            currentPhaseName = phaseName
-            phaseStart = System.currentTimeMillis()
-        }
-
-        fun endPhase() {
-            if (currentPhaseName != null) {
-                val duration = System.currentTimeMillis() - phaseStart
-                phaseTimeMap.put(currentPhaseName, duration)
-                currentPhaseName = null
-            }
-        }
-
-        fun printPhaseTimes() {
-            Log.info("=== 编译阶段耗时统计 ===")
-            if (Log.isAllowed(Log.LogType.DEBUG)) {
-                phaseTimeMap.forEach { entry: ObjectMap.Entry<String, Long> ->
-                    System.out.printf("%-10s: %5d ms%n", entry.key, entry.value)
+                val sourceFile: SourceFile
+                try {
+                    sourceFile = sourceMap.loadSourceMap(file)
+                } catch (e: IOException) {
+                    e.printStackTrace()
+                    return@walk
                 }
+                if (sourceFile.source.isEmpty()) return@walk
+
+                action(sourceFile)
             }
 
-            var total = 0L
-            phaseTimeMap.forEach { entry: ObjectMap.Entry<String, Long> ->
-                total += entry.value
-            }
-            System.out.printf("%-10s: %5d ms%n", "总计", total)
+        } catch (e: IOException) {
+            e.printStackTrace()
         }
     }
 }

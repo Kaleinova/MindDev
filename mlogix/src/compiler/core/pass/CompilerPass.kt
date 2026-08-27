@@ -1,6 +1,7 @@
 package mlogix.compiler.core.pass
 
 import mlogix.compiler.core.CompilerContext
+import mlogix.compiler.core.SourceMap
 
 /**
  * 编译通行证（Pass）契约。
@@ -22,11 +23,11 @@ interface CompilerPass<in I, out O> {
     val dependencies: Set<PassId>
 
     /**
-     * 执行该 Pass。
+     * 在 [sourceFile] 下执行该 Pass。
      *
-     * 注意：Pass 内部不抛异常中断管道；错误一律通过 [CompilerContext.problems] 报告。
+     * 注意：Pass 内部不抛异常中断管道；错误一律通过 [CompilerContext.diagHandler] 报告。
      * 管道继续运行，即使出现错误，也带上 ErrorType/ErrorExpr 继续。
      */
-    fun execute(input: I, context: CompilerContext): O
+    fun execute(input: I, sourceFile: SourceMap.SourceFile): O
 }
 

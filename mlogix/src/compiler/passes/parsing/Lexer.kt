@@ -4,11 +4,11 @@ import arc.func.Boolf
 import arc.graphics.Color
 import arc.graphics.Colors
 import arc.struct.Seq
+import mlogix.compiler.core.CompilerContext
 import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
-import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.LexerDiag
 import mlogix.util.I18N.bundle
@@ -18,8 +18,7 @@ import kotlin.math.min
 /**
  * 一个项目 构造一次
  */
-class Lexer(private val problems: DiagHandler) {
-
+class Lexer(private val context: CompilerContext) {
     private lateinit var sourceFile: SourceFile
 
     private var length: Int = 0
@@ -54,7 +53,7 @@ class Lexer(private val problems: DiagHandler) {
      * 运行前会重置problemCollector
      */
     fun tokenize(source: String): Seq<Token> {
-        problems.clear()
+        context.diagHandler.clear()
 
         val sourceFile = SourceFile(source)
         reset(sourceFile)
@@ -806,13 +805,13 @@ class Lexer(private val problems: DiagHandler) {
 
     private fun error(text: String): LexerDiag {
         val e = LexerDiag(text, Diagnostic.DiagLevel.ERROR)
-        problems.addError(e)
+        context.diagHandler.addError(e)
         return e
     }
 
     private fun warning(text: String): LexerDiag {
         val w = LexerDiag(text, Diagnostic.DiagLevel.WARNING)
-        problems.addWarning(w)
+        context.diagHandler.addWarning(w)
         return w
     }
 

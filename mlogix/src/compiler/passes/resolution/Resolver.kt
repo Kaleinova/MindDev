@@ -3,6 +3,7 @@ package mlogix.compiler.passes.resolution
 import arc.struct.Seq
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Stmt
+import mlogix.compiler.core.CompilerContext
 import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.symbol.DefId
@@ -12,7 +13,6 @@ import mlogix.compiler.core.symbol.SymbolTable
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeScheme
-import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
 import mlogix.compiler.ir.ResolutionResult
@@ -30,7 +30,7 @@ import mlogix.util.I18N.bundle
  * 内置类型（Int/Num/Str/Bool/Null/Array/Fn/Ref）预置进全局作用域（prelude），
  * 因此类型注解里的名字也能被解析。
  */
-class Resolver(private val problems: DiagHandler) {
+class Resolver(private val context: CompilerContext) {
     private lateinit var sourceFile: SourceFile
     private lateinit var symbolTable: SymbolTable
     private lateinit var rootScope: Scope
@@ -338,7 +338,7 @@ class Resolver(private val problems: DiagHandler) {
 
     private fun error(text: String): SemanticDiag {
         val e = SemanticDiag(text, Diagnostic.DiagLevel.ERROR)
-        problems.addError(e)
+        context.diagHandler.addError(e)
         return e
     }
 

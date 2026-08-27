@@ -5,6 +5,7 @@ import arc.struct.ObjectMap
 import arc.struct.Seq
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Stmt
+import mlogix.compiler.core.CompilerContext
 import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.symbol.DefId
@@ -16,7 +17,6 @@ import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeScheme
 import mlogix.compiler.core.type.TypeVisitor
-import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
 import mlogix.compiler.ir.ResolutionResult
@@ -31,7 +31,7 @@ import mlogix.util.I18N.bundle
  *
  * 一个项目 一次构造；一个文件 一次 [analyze]。
  */
-class TypeInferencer(val problems: DiagHandler) {
+class TypeInferencer(val context: CompilerContext) {
     private lateinit var sourceFile: SourceFile
     private lateinit var symbolTable: SymbolTable
     private lateinit var solver: TypeSolver
@@ -61,7 +61,7 @@ class TypeInferencer(val problems: DiagHandler) {
         this.symbolTable = result.symbolTable
 
         // prepare solver
-        solver = TypeSolver(problems, sourceFile)
+        solver = TypeSolver(context.diagHandler, sourceFile)
         constraints.clear()
         genericFns.clear()
         typeParamStack.clear()
@@ -797,14 +797,14 @@ class TypeInferencer(val problems: DiagHandler) {
     // 错误
     private fun error(name: String): SemanticDiag {
         val e = SemanticDiag(name, Diagnostic.DiagLevel.ERROR)
-        problems.addError(e)
+        context.diagHandler.addError(e)
         return e
     }
 
     // 警告
     private fun warning(name: String): SemanticDiag {
         val w = SemanticDiag(name, Diagnostic.DiagLevel.WARNING)
-        problems.addWarning(w)
+        context.diagHandler.addWarning(w)
         return w
     }
 

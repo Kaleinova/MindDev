@@ -11,6 +11,7 @@ import mlogix.compiler.ast.Expr.ErrorExpr
 import mlogix.compiler.ast.Expr.Get
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.ast.Stmt.*
+import mlogix.compiler.core.CompilerContext
 import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned
@@ -27,7 +28,7 @@ import java.util.*
  */
 class Parser(
     private val lexer: Lexer,
-    private val diagHandler: DiagHandler,
+    private val context: CompilerContext,
 ) {
     private lateinit var sourceFile: SourceFile
     private lateinit var input: InputWindow
@@ -49,7 +50,7 @@ class Parser(
      * 运行前会重置problemCollector
      */
     fun parse(source: String): Stmt {
-        diagHandler.clear()
+        context.diagHandler.clear()
 
         sourceFile = SourceFile(source)
         lexer.reset(sourceFile)
@@ -1474,14 +1475,14 @@ class Parser(
         return Snapshot(
             input.deepCopy(),
             lexer.createSnapshot(),
-            diagHandler.createSnapshot(),
+            context.diagHandler.createSnapshot(),
         )
     }
 
     private fun restoreSnapshot(snapshot: Snapshot) {
         input = snapshot.inputSnapshot
         lexer.restoreSnapshot(snapshot.lexerSnapshot)
-        snapshot.diagsSnapshot?.let { diagHandler.restoreSnapshot(it) }
+        snapshot.diagsSnapshot?.let { context.diagHandler.restoreSnapshot(it) }
     }
 
     // ---------- 类生成方法 ----------
@@ -1522,13 +1523,13 @@ class Parser(
 
     private fun error(text: String): ParserDiag {
         val e = ParserDiag(text, Diagnostic.DiagLevel.ERROR)
-        diagHandler.addError(e)
+        context.diagHandler.addError(e)
         return e
     }
 
     private fun warning(text: String): ParserDiag {
         val w = ParserDiag(text, Diagnostic.DiagLevel.WARNING)
-        diagHandler.addWarning(w)
+        context.diagHandler.addWarning(w)
         return w
     }
 

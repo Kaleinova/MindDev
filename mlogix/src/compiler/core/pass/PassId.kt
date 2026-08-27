@@ -11,7 +11,7 @@ import mlogix.compiler.passes.parsing.ParsingPass
  */
 enum class PassId {
     /** 词法+语法分析（一个 Pass 完成，Parser 持有 Lexer 按需扫描 Token） */
-    PARSE,
+    PARSING,
 
     /** 词法分析 仅在 [mlogix.compiler.core.CompilationMode.TOKENIZATION] 时使用，否则被包含在 [ParsingPass] 中 */
     TOKENIZATION,

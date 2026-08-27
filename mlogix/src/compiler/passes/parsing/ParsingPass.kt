@@ -1,7 +1,6 @@
 package mlogix.compiler.passes.parsing
 
 import mlogix.compiler.ast.Stmt
-import mlogix.compiler.core.CompilerContext
 import mlogix.compiler.core.SourceMap.SourceFile
 import mlogix.compiler.core.pass.CompilerPass
 import mlogix.compiler.core.pass.PassId
@@ -21,11 +20,11 @@ class ParsingPass(
     private val parser: Parser,
 ) : CompilerPass<SourceFile, Stmt> {
 
-    override val id: PassId = PassId.PARSE
+    override val id: PassId = PassId.PARSING
 
     override val dependencies: Set<PassId> = emptySet()
 
-    override fun execute(input: SourceFile, context: CompilerContext): Stmt {
+    override fun execute(input: SourceFile, sourceFile: SourceFile): Stmt {
         return parser.parse(input)
     }
 }
