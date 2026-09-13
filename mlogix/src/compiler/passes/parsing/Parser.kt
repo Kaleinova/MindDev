@@ -329,7 +329,7 @@ class Parser(
 
         var typeParams: Seq<Expr.Identifier>? = null
         if (check(TokenType.LESS)) {
-            val result = typeArgs()
+            val result = generics()
             if (result != null) {
                 if (result.remaining != 0) {
                     error(bundle.get("diag.redundant-gt"))
@@ -491,7 +491,7 @@ class Parser(
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
-        val result = typeArgs()
+        val result = generics()
         var typeParams: Seq<Expr.Identifier>? = null
         if (result != null) {
             if (result.remaining != 0) {
@@ -906,7 +906,7 @@ class Parser(
         if (check(TokenType.IDENTIFIER)) {
             val id = next()
             val snapshot = createSnapshotWithDiagHandler()
-            val result = typeArgs()
+            val result = generics()
             if (result == null) {
                 restoreSnapshot(snapshot)
             } else {
@@ -931,7 +931,7 @@ class Parser(
      * @return `null` 解析失败，建议回溯；
      * `TypeArgsResult{ args = Seq(0), _ }` 无泛型或解析失败，无需回溯
      */
-    private fun typeArgs(): TypeArgsResult? {
+    private fun generics(): TypeArgsResult? {
         if (match(TokenType.LESS)) {
             val args = Seq<Expr.Identifier>(2)
             var remaining = 0
@@ -964,7 +964,7 @@ class Parser(
                 }
                 if (check(TokenType.IDENTIFIER)) {
                     val id = next()
-                    val subArgs = typeArgs()
+                    val subArgs = generics()
                     if (subArgs != null) {
                         if (subArgs.args.size == 0) {
                             args.add(Expr.Identifier(id))
