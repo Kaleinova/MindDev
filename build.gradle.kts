@@ -15,7 +15,7 @@ val isWindows = System.getProperty("os.name").lowercase().contains("windows")
 val modArtifactName = project.name
 
 plugins {
-    kotlin("jvm") version "2.3.20"
+    kotlin("jvm") version "2.4.10"
 }
 
 allprojects {
@@ -52,13 +52,12 @@ allprojects {
     // 公共的 Kotlin 编译选项
     tasks.withType<KotlinCompile>().configureEach {
         compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_1_8)
+            jvmTarget.set(JvmTarget.JVM_17)
         }
     }
     tasks.withType<JavaCompile>().configureEach {
-        sourceCompatibility = "1.8"
-        targetCompatibility = "1.8"
-        options.release.set(8)
+        sourceCompatibility = "17"
+        targetCompatibility = "17"
     }
 }
 
