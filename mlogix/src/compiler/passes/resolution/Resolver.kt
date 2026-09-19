@@ -6,10 +6,7 @@ import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.CompilerContext
 import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
-import mlogix.compiler.core.symbol.DefId
-import mlogix.compiler.core.symbol.Scope
-import mlogix.compiler.core.symbol.Symbol
-import mlogix.compiler.core.symbol.SymbolTable
+import mlogix.compiler.core.symbol.*
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.core.type.TypeScheme
@@ -133,6 +130,10 @@ class Resolver(private val context: CompilerContext) {
             is Stmt.SetVarStmt -> {
                 resolveSetVarStmt(stmt, scope)
             }
+
+            is Stmt.EnumStmt -> {
+                resolveEnumStmt(stmt, scope)
+            }
         }
     }
 
@@ -247,6 +248,67 @@ class Resolver(private val context: CompilerContext) {
         resolveStmt(stmt.assignStmt, scope)
     }
 
+    /**
+     * 枚举声明：登记枚举类型符号（[Symbol.ENUM_KEY]）与 `变体名 → 变体 DefId` 表。
+     *
+     * 变体符号**不绑定到作用域**——变体只能经 `枚举名.变体` 访问（Rust 用 `::`，本语言用 `.`），
+     * 因此不同枚举可以有同名变体（`Option.None` 与 `Result.None` 互不干扰），
+     * 变体名也不会污染外层作用域。
+     *
+     * 变体载荷只做「类型名 → DefId」的名称解析（填在注解/类型实参的 `defId` 上），
+     * 载荷类型由 TypeInferencer 转换并转为构造器类型。
+     */
+    private fun resolveEnumStmt(stmt: Stmt.EnumStmt, scope: Scope) {
+        val name = (stmt.name.token.literal as? String) ?: stmt.name.token.type.toString()
+        val enumSymbol = declare(name, BuiltinType.Unknown, stmt.name.span, scope)
+        stmt.defId = enumSymbol?.id
+        if (enumSymbol == null) return
+
+        enumSymbol.values.put(Symbol.ENUM_KEY, true)
+        enumSymbol.values.put(Symbol.ENUM_TYPE_PARAM_COUNT_KEY, stmt.typeParams?.size ?: 0)
+        val variants = EnumVariants()
+        enumSymbol.values.put(Symbol.ENUM_VARIANTS_KEY, variants)
+
+        // 泛型形参先绑定：变体载荷（`Some(T)`、`Named { x: T }`）要能解析到它
+        val enumScope = scope.child()
+        stmt.typeParams?.let { typeParams ->
+            for (typeParam in typeParams) resolveTypeParam(typeParam, enumScope)
+        }
+
+        for (variant in stmt.variants) {
+            val variantName = (variant.name.token.literal as? String) ?: variant.name.token.type.toString()
+            if (variants.contains(variantName)) {
+                error(bundle.format("diag.duplicate-variant", name, variantName))
+                    .label(variant.name, "")
+                continue
+            }
+            val variantSymbol = symbolTable.declare(variantName, BuiltinType.Unknown, variant.name.span)
+            variantSymbol.values.put(Symbol.ENUM_VARIANT_KEY, true)
+            variants.put(variantName, variantSymbol.id)
+            variant.name.defId = variantSymbol.id
+
+            // 每个变体独立子作用域：结构体变体的字段名在此登记（重复字段名即重复定义）
+            val variantScope = enumScope.child()
+            for (field in stmt.fieldsOf(variant)) {
+                if (field is Expr.Annotation) {
+                    // 结构体变体 `Named { name: Str }`：字段名是新定义，冒号后才是类型名
+                    val fieldIdent = field.expr as? Expr.Identifier
+                    if (fieldIdent != null) {
+                        val fieldName =
+                            (fieldIdent.token.literal as? String) ?: fieldIdent.token.type.toString()
+                        declare(fieldName, BuiltinType.Unknown, fieldIdent.span, variantScope)
+                            ?.let { fieldIdent.defId = it.id }
+                    }
+                    for (annotation in field.annotations) resolveAnnotationNames(annotation, variantScope)
+                } else if (variant !is Stmt.EnumStmt.EnumVariant.Struct) {
+                    // 元组变体 `Rgb(Num, Num)`：载荷本身就是类型表达式
+                    // （结构体变体缺少 `: 类型` 时 Parser 已报错，不再当类型名解析以免级联报错）
+                    resolveAnnotationNames(field, variantScope)
+                }
+            }
+        }
+    }
+
     // ========== 表达式解析==========
     private fun resolveExpr(expr: Expr?, scope: Scope) {
         if (expr == null) return
@@ -303,10 +365,57 @@ class Resolver(private val context: CompilerContext) {
             }
 
             is Expr.Get -> {
-                resolveExpr(expr.obj, scope)
-                resolveExpr(expr.field, scope)
+                val enumSymbol = enumTypeSymbolOf(expr.obj, scope)
+                if (enumSymbol != null) {
+                    resolveEnumVariantAccess(expr, enumSymbol, scope)
+                } else {
+                    resolveExpr(expr.obj, scope)
+                    resolveExpr(expr.field, scope)
+                }
             }
         }
+    }
+
+    /**
+     * `枚举名.变体` 解析：`obj` 已确认是枚举类型符号，`field` 只在变体表里查，
+     * 不进普通作用域（否则 `Option.Some` 的 `Some` 会被当成未声明的变量名）。
+     */
+    private fun resolveEnumVariantAccess(expr: Expr.Get, enumSymbol: Symbol, scope: Scope) {
+        val objIdent = expr.obj as? Expr.Identifier
+        objIdent?.defId = enumSymbol.id
+        // `Option<Int>.Some`：显式类型实参是类型名，按类型名解析
+        objIdent?.typeArgs?.let { args ->
+            for (arg in args) resolveAnnotationNames(arg, scope)
+        }
+
+        val fieldIdent = expr.field as? Expr.Identifier
+        if (fieldIdent == null) {
+            resolveExpr(expr.field, scope)
+            return
+        }
+        val fieldName = (fieldIdent.token.literal as? String) ?: fieldIdent.token.type.toString()
+        val variants = enumSymbol.values.get(Symbol.ENUM_VARIANTS_KEY) as? EnumVariants
+        val variantDefId = variants?.get(fieldName)
+        if (variantDefId == null) {
+            error(bundle.format("diag.no-such-variant", enumSymbol.name, fieldName))
+                .label(
+                    fieldIdent,
+                    bundle.format("diag.no-such-variant.help", enumSymbol.name, variants?.namesText() ?: ""),
+                )
+        } else {
+            fieldIdent.defId = variantDefId
+        }
+    }
+
+    /**
+     * 若 [expr] 是解析到枚举类型符号的标识符，返回该符号，否则返回 `null`。
+     * 只做名称查询（不填 `defId`），供 `枚举名.变体` 判定使用。
+     */
+    private fun enumTypeSymbolOf(expr: Expr, scope: Scope): Symbol? {
+        val ident = expr as? Expr.Identifier ?: return null
+        val name = (ident.token.literal as? String) ?: return null
+        val symbol = scope.lookup(name)?.let { symbolTable.get(it) } ?: return null
+        return if (symbol.values.get(Symbol.ENUM_KEY) == true) symbol else null
     }
 
     // ========== 工具 ==========

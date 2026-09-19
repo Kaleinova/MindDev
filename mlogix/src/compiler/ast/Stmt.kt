@@ -87,4 +87,65 @@ abstract class Stmt(span: Span) : ASTNode(span) {
         val fields: Seq<ASTNode>,
         val methods: Seq<FnStmt>
     ) : Stmt(span)
+
+    /**
+     * 枚举声明（Rust 风格），变体用 `.` 访问：`Color.Red`、`Option.Some(1)`、`Shape.Rect(1.0, 2.0)`。
+     *
+     * ```mlx
+     * enum Option<T> {
+     *     None
+     *     Some(T)
+     *     Point { x: Num, y: Num }
+     * }
+     * ```
+     *
+     * 三种变体形态（载荷都按声明顺序传入，见 [fieldsOf]）：
+     * - 单元变体 `Red` —— 本身就是值；
+     * - 元组变体 `Rgb(Num, Num, Num)` —— 构造器；
+     * - 结构体变体 `Named { name: Str, alpha: Num }` —— 构造器（字段名只用于诊断与文档，
+     *   调用处不支持具名实参）。
+     */
+    data class EnumStmt(
+        override val span: Span,
+        val name: Expr.Identifier,
+        val typeParams: Seq<Expr.Identifier>?,
+        val variants: Seq<EnumVariant>
+    ) : Stmt(span) {
+        /** 由 Resolver 填充：此枚举定义对应的 [DefId]（未声明/解析失败时为 null） */
+        var defId: DefId? = null
+
+        /** 变体的载荷字段；单元变体没有载荷 */
+        fun fieldsOf(variant: EnumVariant): Seq<Expr> = when (variant) {
+            is EnumVariant.Unit -> Seq(0)
+            is EnumVariant.Tuple -> variant.fields
+            is EnumVariant.Struct -> variant.fields
+        }
+
+        /** 一个枚举变体 */
+        sealed class EnumVariant(open val span: Span) : Spanned {
+            override fun span(): Span {
+                return this.span
+            }
+
+            /** 变体名（`Color.Red` 中的 `Red`） */
+            abstract val name: Expr.Identifier
+
+            /** 单元变体 `Red` */
+            data class Unit(override val span: Span, override val name: Expr.Identifier) : EnumVariant(span)
+
+            /** 元组变体 `Rgb(Num, Num, Num)`：载荷是类型表达式 */
+            data class Tuple(
+                override val span: Span,
+                override val name: Expr.Identifier,
+                val fields: Seq<Expr>
+            ) : EnumVariant(span)
+
+            /** 结构体变体 `Named { name: Str }`：载荷是 `字段名 : 类型` 注解 */
+            data class Struct(
+                override val span: Span,
+                override val name: Expr.Identifier,
+                val fields: Seq<Expr>
+            ) : EnumVariant(span)
+        }
+    }
 }

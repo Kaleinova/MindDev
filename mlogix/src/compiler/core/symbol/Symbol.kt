@@ -34,5 +34,20 @@ class Symbol(
 
         /** [values] 中记录函数声明类型参数数量的键（调用处显式实参数量检查用）。 */
         const val TYPE_PARAM_COUNT_KEY = "typeParamCount"
+
+        /** [values] 中标记"枚举类型"符号的键（Resolver 写入，TypeInferencer 读取）。 */
+        const val ENUM_KEY = "isEnum"
+
+        /** [values] 中记录枚举声明类型参数数量的键（Resolver 写入，类型实参数量检查用）。 */
+        const val ENUM_TYPE_PARAM_COUNT_KEY = "enumTypeParamCount"
+
+        /** [values] 中记录变体表 [EnumVariants] 的键（Resolver 写入，`枚举名.变体` 查找用）。 */
+        const val ENUM_VARIANTS_KEY = "enumVariants"
+
+        /** [values] 中标记"枚举变体"符号的键（Resolver 写入，TypeInferencer 读取）。 */
+        const val ENUM_VARIANT_KEY = "isEnumVariant"
+
+        /** [values] 中记录变体载荷信息 [VariantPayload] 的键（TypeInferencer 写入，诊断用）。 */
+        const val VARIANT_PAYLOAD_KEY = "variantPayload"
     }
 }

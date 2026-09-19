@@ -1,6 +1,7 @@
 package mlogix.compiler.ast
 
 import arc.struct.Seq
+import mlogix.compiler.ast.Stmt.EnumStmt.EnumVariant
 import mlogix.compiler.ast.Stmt.MatchStmt.MatchBranch
 import mlogix.compiler.ast.Stmt.UseStmt.UseItem
 import mlogix.compiler.core.SourceFile
@@ -49,6 +50,7 @@ object ASTPrinter {
             is Expr -> printNode(node, indent, isLast, EXPR_COLOR)
             is UseItem -> printNode(node, indent, isLast, EXPR_COLOR)
             is MatchBranch -> printNode(node, indent, isLast, EXPR_COLOR)
+            is EnumVariant -> printNode(node, indent, isLast, EXPR_COLOR)
             is Token -> printLine(indent, isLast, TOKEN_COLOR + node + Ansi.DEFAULT)
             is Seq<*> -> printList(node, indent, isLast)
             is Array<*> -> printArray(node, indent, isLast)

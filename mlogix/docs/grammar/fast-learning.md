@@ -664,3 +664,116 @@ for i in 0 :< 5 {
 ```
 
 你可能会好奇，`:=`好端端的为什么要弄个`:<`左闭右开的区间呢？实际上，`:<`反而是最常用的区间表示方法。
+
+---
+
+## 11. 💡枚举 (Enum)
+
+枚举表示「多种形态之一」：同一个枚举的各个**变体**共享一个类型名，但各自携带的数据不同。
+适合表达「要么是这样，要么是那样」的值。
+
+### 💡声明枚举
+
+用`enum`声明，变体写在`{ }`里，变体之间用换行或`,`分隔。
+
+```mlx
+enum Color {
+    Red
+    Green
+    Blue
+}
+```
+
+### ⭐用 `.` 访问变体
+
+变体必须带上枚举名，中间用`.`连接（Rust 用`::`，MLogiX 用`.`）。
+
+```mlx
+set c = Color.Red
+```
+
+变体名属于它所在的枚举：不同枚举可以有同名变体而互不干扰，但**不能省略枚举名**。
+
+```mlx
+enum A { None }
+enum B { None }
+
+set a = A.None # ✅
+set b = B.None # ✅
+set c = None   # ❌ 未声明的标识符，必须写成 `A.None`
+```
+
+*枚举类型名本身不是值，`set c = Color`会报错，请访问它的某个变体。*
+
+### 💡带载荷的变体
+
+变体可以携带数据，称为**载荷**。
+
+**1. 元组变体** —— 括号里按顺序写类型
+
+```mlx
+enum Shape {
+    Point          # 单元变体：不携带数据
+    Circle(Num)    # 元组变体：一个Num
+    Rect(Num, Num) # 元组变体：两个Num
+}
+
+set a = Shape.Point
+set b = Shape.Circle(1.5)
+set c = Shape.Rect(2.0, 3.0)
+```
+
+**2. 结构体变体** —— 花括号里写`字段名 : 类型`
+
+```mlx
+enum Shape {
+    Rect { width: Num, height: Num }
+}
+
+set r = Shape.Rect(2.0, 3.0) # 传参依旧按字段声明顺序（暂不支持具名实参）
+```
+
+| 变体形态 | 写法示例 | `枚举名.变体`得到的值 |
+|:---|:---|:---|
+| 单元变体 | `Red` | 枚举类型的值本身 |
+| 元组变体 | `Rgb(Num, Num, Num)` | 构造器；`Color.Rgb(1.0, 2.0, 3.0)`得到`Color` |
+| 结构体变体 | `Rect { width: Num }` | 同上，实参按字段声明顺序 |
+
+带载荷的变体不加括号时就是**函数值**，可以像函数一样传递：
+
+```mlx
+set f = Shape.Circle
+set s = f(1.5)
+```
+
+*载荷数量或类型不符会报错，例如`Shape.Rect(2.0)`少传了`height`。*
+
+### 🔬泛型枚举
+
+枚举可以有类型参数，写法与泛型函数一致（`enum 名字<T, ...>`）。
+每个访问点独立推断，互不影响。
+
+```mlx
+enum Option<T> {
+    None
+    Some(T)
+}
+
+set a = Option.Some(1)        # T 推断为 Int
+set b = Option.Some("文本")    # T 推断为 Str，与 a 无关
+set n = Option.None           # 合法：T 待推断
+set e = Option<Num>.Some(1.0) # 也可以显式写出类型实参
+```
+
+`Option<T>`这样的枚举类型可以写在类型标注里，用于检查传入的载荷：
+
+```mlx
+fn unwrap(x: Option<Int>) -> Int {
+    return 0
+}
+
+set r = unwrap(Option.Some(1))     # ✅
+set bad = unwrap(Option.Some("s")) # ❌ 类型不匹配：期望 Int，实际 Str
+```
+
+*`match`对枚举的**穷尽性检查**（是否覆盖全部变体）尚未实现。*

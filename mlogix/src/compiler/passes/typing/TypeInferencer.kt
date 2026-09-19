@@ -11,6 +11,7 @@ import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.symbol.DefId
 import mlogix.compiler.core.symbol.Symbol
 import mlogix.compiler.core.symbol.SymbolTable
+import mlogix.compiler.core.symbol.VariantPayload
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.core.type.BuiltinType
@@ -238,6 +239,10 @@ class TypeInferencer(val context: CompilerContext) {
                 //  接入方式：单枚举值注解转成 Type 并与符号类型加 Equal 约束（多枚举值走 union-not-supported）。
             }
 
+            is Stmt.EnumStmt -> {
+                analyzeEnumStmt(stmt)
+            }
+
             else -> {
                 // unhandled statement kinds
             }
@@ -371,6 +376,166 @@ class TypeInferencer(val context: CompilerContext) {
     }
 
     /**
+     * 枚举声明：为枚举类型分配类型参数变量，并把每个变体登记为「构造器」类型方案。
+     *
+     * - 单元变体 `Red` → 类型就是枚举类型（`Color`），它本身就是值；
+     * - 元组/结构体变体 `Rgb(Num, Num, Num)` → `(Num, Num, Num) -> Color`，
+     *   于是 `Color.Rgb` 是函数值、`Color.Rgb(1.0, 2.0, 3.0)` 是 `Color` 值；
+     * - 类型方案 `∀T. (T) -> Option<T>` 让每个访问点实例化出独立的类型变量（多态，
+     *   与泛型函数同机制），因此 `Option.Some(1)` 与 `Option.Some("s")` 互不干扰。
+     */
+    private fun analyzeEnumStmt(stmt: Stmt.EnumStmt) {
+        val enumSymbol = stmt.defId?.let { symbolTable.get(it) } ?: return
+
+        // 泛型形参：每个类型参数分配 fresh 变量并写入类型参数符号（与泛型函数一致）
+        val typeParams = stmt.typeParams
+        val typeParamVars = Seq<Type.Var>(typeParams?.size ?: 0)
+        if (typeParams != null) {
+            for (typeParam in typeParams) {
+                val v = solver.freshVar()
+                typeParamVars.add(v)
+                varDeclSpans.put(v.index, typeParam.span)
+                typeParam.defId?.let { defId ->
+                    symbolTable.get(defId)?.let { paramSymbol -> paramSymbol.type = v }
+                }
+            }
+        }
+
+        val enumType: Type
+        if (typeParamVars.isEmpty) {
+            enumType = Type.Con(enumSymbol.name)
+        } else {
+            val args = Seq<Type>(typeParamVars.size)
+            for (v in typeParamVars) args.add(v)
+            enumType = Type.App(Type.Con(enumSymbol.name), args)
+        }
+        enumSymbol.type = enumType
+
+        for (variant in stmt.variants) {
+            val variantSymbol = variant.name.defId?.let { symbolTable.get(it) } ?: continue
+            val fields = stmt.fieldsOf(variant)
+            val payloadTypes = Seq<Type>(fields.size)
+            val payloadNames = Seq<String>(fields.size)
+            val payloadSpans = Seq<Span>(fields.size)
+            for (field in fields) {
+                payloadTypes.add(variantFieldToType(field))
+                payloadNames.add(variantFieldNameOf(field))
+                payloadSpans.add(field.span)
+            }
+
+            val variantType: Type =
+                if (payloadTypes.isEmpty) enumType else Type.Func(payloadTypes, enumType)
+
+            variantSymbol.type = variantType
+            // 类型方案：量化的类型参数在每个访问点实例化为 fresh 变量
+            variantSymbol.typeScheme = TypeScheme(typeParamVars, variantType)
+            variantSymbol.values.put(Symbol.VARIANT_PAYLOAD_KEY, VariantPayload(payloadNames, payloadSpans))
+        }
+    }
+
+    /**
+     * 变体载荷字段 → [Type]：
+     * - 结构体变体字段是 `名称 : 类型` 注解 → [annotationToType]；
+     * - 元组变体字段本身就是类型表达式 → [typeArgToType]。
+     */
+    private fun variantFieldToType(field: Expr): Type = when (field) {
+        is Expr.Annotation -> annotationToType(field)
+        is Expr.Identifier -> typeArgToType(field)
+        is Expr.Tuple -> {
+            val elements = Seq<Type>(field.elements.size)
+            for (element in field.elements) elements.add(variantFieldToType(element))
+            Type.TupleType(elements)
+        }
+
+        else -> Type.Error
+    }
+
+    /** 变体载荷字段名（仅诊断用）；元组变体字段没有名字 */
+    private fun variantFieldNameOf(field: Expr): String = when (field) {
+        is Expr.Annotation -> (field.expr as? Expr.Identifier)?.let { identifierNameOf(it) } ?: ""
+        is Expr.Identifier -> identifierNameOf(field)
+        else -> ""
+    }
+
+    private fun identifierNameOf(identifier: Expr.Identifier): String =
+        (identifier.token.literal as? String) ?: identifier.token.type.toString()
+
+    /**
+     * 若 [expr] 是「枚举名.变体」访问（`field` 的 [DefId] 由 Resolver 填为变体符号），返回变体符号。
+     */
+    private fun enumVariantSymbolOf(expr: Expr?): Symbol? {
+        val get = expr as? Expr.Get ?: return null
+        val fieldIdent = get.field as? Expr.Identifier ?: return null
+        val symbol = fieldIdent.defId?.let { symbolTable.get(it) } ?: return null
+        return if (symbol.values.get(Symbol.ENUM_VARIANT_KEY) == true) symbol else null
+    }
+
+    /** [expr] 是解析到枚举类型符号的标识符时返回该符号 */
+    private fun enumTypeSymbolOf(expr: Expr?): Symbol? {
+        val ident = expr as? Expr.Identifier ?: return null
+        val symbol = ident.defId?.let { symbolTable.get(it) } ?: return null
+        return if (symbol.values.get(Symbol.ENUM_KEY) == true) symbol else null
+    }
+
+    /**
+     * 按访问点实例化变体构造器：类型实参来自 `枚举名<T, ...>.变体`。
+     * 数量不符时复用 [diag.explicit-type-arg-count] 并回退为全推断（继续编译）。
+     */
+    private fun instantiateVariant(variantSymbol: Symbol, at: Expr, explicitArgs: Seq<Expr.Identifier>?): Type {
+        val declaredCount = variantSymbol.typeScheme.typeVars.size
+        val argCount = explicitArgs?.size ?: 0
+        if (argCount != 0 && argCount != declaredCount) {
+            error(bundle.format("diag.explicit-type-arg-count", declaredCount, argCount))
+                .label(at, bundle.format("diag.explicit-type-arg-count.help", declaredCount))
+            return variantSymbol.typeScheme.instantiateWith(Seq<Type>(0)) { solver.freshVar() }
+        }
+        if (argCount == 0) {
+            return variantSymbol.typeScheme.instantiateWith(Seq<Type>(0)) { solver.freshVar() }
+        }
+        val argTypes = Seq<Type>(argCount)
+        for (arg in explicitArgs!!) argTypes.add(typeArgToType(arg))
+        return variantSymbol.typeScheme.instantiateWith(argTypes) { solver.freshVar() }
+    }
+
+    /**
+     * `枚举名.变体(实参...)`：按变体载荷检查实参并产出枚举类型。
+     *
+     * 与普通调用不同：载荷类型就是构造器形参，不需要「结构链接」再逐实参约束，
+     * 因此数量不符能给出变体专属报错，类型不符能带上字段声明方位置（声明方 label）。
+     */
+    private fun inferEnumVariantCall(call: Expr.Call, variantSymbol: Symbol): InferResult {
+        val explicitArgs = (call.callee as? Expr.Get)?.let { (it.obj as? Expr.Identifier)?.typeArgs }
+        val constructorType = instantiateVariant(variantSymbol, call.callee, explicitArgs)
+        val payloadTypes = (constructorType as? Type.Func)?.params ?: Seq<Type>(0)
+        val enumType = (constructorType as? Type.Func)?.result ?: constructorType
+        val payload = variantSymbol.values.get(Symbol.VARIANT_PAYLOAD_KEY) as? VariantPayload
+
+        val combined = Seq<Constraint>(0)
+        if (payloadTypes.size != call.args.size) {
+            error(
+                bundle.format(
+                    "diag.enum-variant-field-count",
+                    variantSymbol.name,
+                    payloadTypes.size,
+                    call.args.size,
+                )
+            ).label(
+                call,
+                bundle.format("diag.enum-variant-fields", variantSymbol.name, payload?.namesText() ?: ""),
+            )
+        }
+
+        for ((i, arg) in call.args.withIndex()) {
+            val r = inferExpr(arg)
+            combined.addAll(r.constraints)
+            if (i < payloadTypes.size) {
+                combined.add(Constraint.Equal(r.type, payloadTypes[i], arg.span, payload?.spans?.get(i)))
+            }
+        }
+        return InferResult(enumType, combined)
+    }
+
+    /**
      * 收集 [fnType]（泛型函数签名）中出现的、不在 [declared] 中的自由类型变量
      * （未注解形参/返回值引入的变量）。暂挂 scheme 时把这些变量一并量化，
      * 实例化时统一替换为 fresh 变量，避免跨调用点共享。
@@ -411,6 +576,11 @@ class TypeInferencer(val context: CompilerContext) {
                         // 类型参数只能出现在类型位置（注解/类型实参），不能作为值使用
                         error(bundle.format("diag.type-param-as-value", symbol.name))
                             .label(expr, "")
+                        InferResult(BuiltinType.Error, Seq(0))
+                    } else if (symbol.values.get(Symbol.ENUM_KEY) == true) {
+                        // 枚举类型名只能用来访问变体（`Color.Red`），不能当值；变体的类型就是枚举类型
+                        error(bundle.format("diag.enum-as-value", symbol.name))
+                            .label(expr, bundle.format("diag.enum-as-value.help", symbol.name))
                         InferResult(BuiltinType.Error, Seq(0))
                     } else {
                         // 泛型函数（或值位置携带显式类型实参）：按调用点实例化类型方案，
@@ -515,6 +685,10 @@ class TypeInferencer(val context: CompilerContext) {
             }
 
             is Expr.Call -> {
+                // `枚举名.变体(...)`：变体构造器调用，直接按载荷检查实参
+                val variantSymbol = enumVariantSymbolOf(expr.callee)
+                if (variantSymbol != null) return inferEnumVariantCall(expr, variantSymbol)
+
                 val callee = inferExpr(expr.callee)
                 val combined = Seq<Constraint>(0)
                 combined.addAll(callee.constraints)
@@ -563,6 +737,15 @@ class TypeInferencer(val context: CompilerContext) {
             }
 
             is Expr.Get -> {
+                // `枚举名.变体`：变体访问；单元变体得到枚举类型，带载荷变体得到构造器函数
+                val variantSymbol = enumVariantSymbolOf(expr)
+                if (variantSymbol != null) {
+                    val explicitArgs = (expr.obj as? Expr.Identifier)?.typeArgs
+                    return InferResult(instantiateVariant(variantSymbol, expr, explicitArgs), Seq(0))
+                }
+                // `枚举名.xxx` 中 xxx 不是变体：Resolver 已报「没有这个变体」，这里静默降级
+                if (enumTypeSymbolOf(expr.obj) != null) return InferResult(BuiltinType.Error, Seq(0))
+
                 val ot = inferExpr(expr.obj)
                 val combined = Seq<Constraint>(0)
                 combined.addAll(ot.constraints)
@@ -671,6 +854,9 @@ class TypeInferencer(val context: CompilerContext) {
             }
             val argTypes = Seq<Type>(nestedArgs.size)
             for (a in nestedArgs) argTypes.add(typeArgToType(a))
+            if (symbol?.values?.get(Symbol.ENUM_KEY) == true) {
+                return enumAppType(symbol, argTypes, expr)
+            }
             return if (symbol?.type == BuiltinType.Array) {
                 if (nestedArgs.size != 1) {
                     error(bundle.format("diag.type-arg-count", BuiltinType.Array.name, 1, nestedArgs.size))
@@ -686,6 +872,10 @@ class TypeInferencer(val context: CompilerContext) {
             }
         }
         // 裸标识符
+        if (symbol?.values?.get(Symbol.ENUM_KEY) == true) {
+            // 裸写 `Option`：类型实参全部待推断（与裸 `Array` 的宽松处理一致）
+            return enumAppType(symbol, Seq<Type>(0), expr)
+        }
         return when {
             symbol == null -> Type.Error
             symbol.values.get(Symbol.TYPE_PARAM_KEY) == true -> symbol.type
@@ -695,6 +885,35 @@ class TypeInferencer(val context: CompilerContext) {
 
             else -> symbol.type
         }
+    }
+
+    /**
+     * 枚举类型应用 `Option<Int>`。
+     *
+     * - 非泛型枚举 `Color`：`Type.Con("Color")`；写类型实参（`Color<Int>`）报「不接受类型实参」；
+     * - 泛型枚举 `Option<T>`：实参数量必须等于声明的类型参数数量（否则 [diag.type-arg-count]）；
+     *   [argTypes] 为空（裸写 `Option`）时按「全部待推断」补 fresh 变量。
+     */
+    private fun enumAppType(symbol: Symbol, argTypes: Seq<Type>, at: Expr): Type {
+        val declaredCount = symbol.values.get(Symbol.ENUM_TYPE_PARAM_COUNT_KEY) as? Int ?: 0
+        if (declaredCount == 0) {
+            if (!argTypes.isEmpty) {
+                error(bundle.format("diag.type-not-generic", symbol.name)).label(at, "")
+                return Type.Error
+            }
+            return Type.Con(symbol.name)
+        }
+        if (argTypes.isEmpty) {
+            val args = Seq<Type>(declaredCount)
+            repeat(declaredCount) { args.add(solver.freshVar()) }
+            return Type.App(Type.Con(symbol.name), args)
+        }
+        if (argTypes.size != declaredCount) {
+            error(bundle.format("diag.type-arg-count", symbol.name, declaredCount, argTypes.size))
+                .label(at, "")
+            return Type.Error
+        }
+        return Type.App(Type.Con(symbol.name), argTypes)
     }
 
     /**

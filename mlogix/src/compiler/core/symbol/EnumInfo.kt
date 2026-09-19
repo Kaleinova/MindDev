@@ -1,0 +1,47 @@
+package mlogix.compiler.core.symbol
+
+import arc.struct.ObjectMap
+import arc.struct.Seq
+import mlogix.compiler.core.span.Span
+
+/**
+ * 枚举的变体表：`变体名 → 变体 [DefId]`（挂在枚举类型符号的 [Symbol.values] 上）。
+ *
+ * 变体名不进入作用域（只能经 `枚举名.变体` 访问），因此这张表就是变体的唯一定义处；
+ * 用具名载体而非裸 `ObjectMap`，避免从 `Any?` 取值时的 unchecked cast。
+ */
+class EnumVariants {
+    private val variants = ObjectMap<String, DefId>()
+
+    fun contains(name: String): Boolean = variants.containsKey(name)
+
+    fun get(name: String): DefId? = variants.get(name)
+
+    fun put(name: String, defId: DefId) {
+        variants.put(name, defId)
+    }
+
+    /** 变体名列表文本（如 `Red, Green`），用于诊断 */
+    fun namesText(): String {
+        val builder = StringBuilder()
+        variants.forEach { entry: ObjectMap.Entry<String, DefId> ->
+            if (builder.isNotEmpty()) builder.append(", ")
+            builder.append(entry.key)
+        }
+        return builder.toString()
+    }
+}
+
+/**
+ * 变体载荷信息（挂在变体符号的 [Symbol.values] 上）：
+ * 字段数量、字段名（结构体变体用）、字段声明位置（类型不匹配时的声明方 label）。
+ *
+ * @param names 每个载荷字段的名字；元组变体的字段没有名字（空串）
+ * @param spans 每个载荷字段的声明位置
+ */
+class VariantPayload(val names: Seq<String>, val spans: Seq<Span>) {
+    val count: Int get() = names.size
+
+    /** 字段名列表文本（如 `width, height`），用于诊断 */
+    fun namesText(): String = names.toString(", ")
+}

@@ -73,6 +73,7 @@ class Parser(
         check(TokenType.RETURN) -> returnStmt()
         check(TokenType.SET) -> setStmt()
         check(TokenType.STRUCT) -> structStmt()
+        check(TokenType.ENUM) -> enumStmt()
 
         else -> {
             loopStmtWithLabel() ?: exprStmt()
@@ -557,6 +558,191 @@ class Parser(
             }
         }
         return StructStmt(between(start, end), Expr.Identifier(name), typeParams, fields, methods)
+    }
+
+    /**
+     * 枚举声明（变体用 `.` 访问）：
+     * ```
+     * enum Option<T> {
+     *     None
+     *     Some(T)
+     *     Point { x: Num, y: Num }
+     * }
+     * ```
+     * 变体之间以换行或 `,` 分隔（与结构体字段一致，两者其一即可）。
+     */
+    private fun enumStmt(): Stmt? {
+        val start = next()
+
+        val name = consume(TokenType.IDENTIFIER) {
+            error(bundle.get("diag.miss-enum-name"))
+                .label(lookAhead(0))
+        }
+        if (name == null) {
+            recoverByTokenTree(TokenType.RECOVERY)
+            return null
+        }
+
+        var typeParams: Seq<Expr.Identifier>? = null
+        if (check(TokenType.LESS)) {
+            val result = generics()
+            if (result != null) {
+                if (result.remaining != 0) {
+                    error(bundle.get("diag.redundant-gt"))
+                        .label(prevToken.span.cutLast(result.remaining))
+                }
+                if (result.args.size != 0) {
+                    typeParams = result.args
+                }
+            }
+        }
+
+        var end: Token = name
+        val variants = Seq<EnumStmt.EnumVariant>(4)
+        if (check(TokenType.LBRACE)) {
+            end = next()
+            var isSeparatorOptional = true
+            while (true) {
+                if (check(TokenType.RBRACE)) {
+                    end = next()
+                    break
+                }
+                if (isAtEnd) {
+                    error(bundle.get("diag.miss-enum-end"))
+                        .label(start, bundle.get("diag.stmt-start"))
+                        .label(lookAhead(0), bundle.get("diag.current"))
+                    break
+                }
+                if (check(TokenType.IDENTIFIER)) {
+                    if (!isSeparatorOptional) {
+                        error(bundle.get("diag.miss-variant-separator"))
+                            .label(lookAhead(0))
+                    }
+                    enumVariant()?.let { variants.add(it) }
+                    // 变体已被消耗：无论成功与否都推进分隔符，避免死循环
+                    isSeparatorOptional = match(TokenType.COMMA) || matchStmtEnd()
+                } else {
+                    error(bundle.get("diag.miss-enum-item"))
+                        .label(lookAhead(0))
+                    when (recoverByTokenTree(TokenType.RECOVERY)) {
+                        TokenType.RBRACE -> {
+                            end = next()
+                            return EnumStmt(between(start, end), Expr.Identifier(name), typeParams, variants)
+                        }
+
+                        TokenType.IDENTIFIER -> {
+                            enumVariant()?.let { variants.add(it) }
+                            isSeparatorOptional = match(TokenType.COMMA) || matchStmtEnd()
+                        }
+
+                        else -> break
+                    }
+                }
+            }
+        } else {
+            error(bundle.get("diag.miss-enum-brace"))
+                .label(start, bundle.get("diag.stmt-start"))
+                .label(lookAhead(0), bundle.get("diag.current"))
+        }
+        return EnumStmt(between(start, end), Expr.Identifier(name), typeParams, variants)
+    }
+
+    /**
+     * 枚举变体，调用前须 `check(TokenType.IDENTIFIER)`：
+     * - 单元变体 `Red`
+     * - 元组变体 `Rgb(Num, Num, Num)`：载荷是类型表达式
+     * - 结构体变体 `Named { name: Str, alpha: Num }`：载荷是 `字段名 : 类型` 注解
+     */
+    private fun enumVariant(): EnumStmt.EnumVariant? {
+        val variantName = consume(TokenType.IDENTIFIER) {
+            error(bundle.get("diag.miss-variant-name"))
+                .label(lookAhead(0))
+        }
+        if (variantName == null) {
+            recoverByTokenTree(TokenType.RECOVERY)
+            return null
+        }
+        val ident = Expr.Identifier(variantName)
+
+        // 元组变体 `Rgb(Num, Num, Num)`
+        if (check(TokenType.LPAREN)) {
+            val lParen = next()
+            val fields = seq(
+                { identifier() },
+                EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
+                { false },
+                {
+                    error(bundle.get("diag.miss-variant-field-separator"))
+                        .label(lookAhead(0))
+                        .label(lParen, bundle.get("diag.variant-field-start"))
+                },
+                TokenType.RPAREN,
+                true,
+                {
+                    error(bundle.get("diag.miss-variant-field-end"))
+                        .label(lookAhead(0))
+                        .label(lParen, bundle.get("diag.variant-field-start"))
+                }
+            )
+            return EnumStmt.EnumVariant.Tuple(between(variantName, prevToken), ident, fields)
+        }
+
+        // 结构体变体 `Named { name: Str, alpha: Num }`
+        if (check(TokenType.LBRACE)) {
+            val lBrace = next()
+            val fields = Seq<Expr>(4)
+            var isCommaOptional = true
+            while (true) {
+                if (check(TokenType.RBRACE)) {
+                    val rBrace = next()
+                    return EnumStmt.EnumVariant.Struct(between(variantName, rBrace), ident, fields)
+                }
+                if (isAtEnd) {
+                    error(bundle.get("diag.miss-variant-struct-end"))
+                        .label(lBrace, bundle.get("diag.variant-field-start"))
+                        .label(lookAhead(0), bundle.get("diag.current"))
+                    return EnumStmt.EnumVariant.Struct(between(variantName, prevToken), ident, fields)
+                }
+                if (check(TokenType.IDENTIFIER)) {
+                    if (!isCommaOptional) {
+                        error(bundle.get("diag.miss-variant-field-separator"))
+                            .label(lookAhead(0))
+                    }
+                    val fieldName = next()
+                    val field = annotation(Expr.Identifier(fieldName))
+                    if (field !is Expr.Annotation) {
+                        error(bundle.get("diag.miss-variant-field-type"))
+                            .label(fieldName, "")
+                    }
+                    fields.add(field)
+                    isCommaOptional = match(TokenType.COMMA) || matchStmtEnd()
+
+                } else {
+                    error(bundle.get("diag.miss-variant-field"))
+                        .label(lookAhead(0))
+                    when (recoverByTokenTree(EnumSet.of(TokenType.COMMA, TokenType.NEWLINE, TokenType.RBRACE))) {
+                        TokenType.RBRACE -> {
+                            val rBrace = next()
+                            return EnumStmt.EnumVariant.Struct(between(variantName, rBrace), ident, fields)
+                        }
+
+                        TokenType.EOF -> return EnumStmt.EnumVariant.Struct(
+                            between(variantName, prevToken),
+                            ident,
+                            fields
+                        )
+
+                        else -> {
+                            next()
+                            isCommaOptional = true
+                        }
+                    }
+                }
+            }
+        }
+
+        // 单元变体 `Red`
+        return EnumStmt.EnumVariant.Unit(variantName.span, ident)
     }
 
     private fun exprStmt(): Stmt? {
