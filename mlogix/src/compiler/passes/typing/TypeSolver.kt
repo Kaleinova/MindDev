@@ -7,6 +7,7 @@ import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
+import mlogix.compiler.core.type.TypeOrigin
 import mlogix.compiler.core.type.TypeVisitor
 import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.diagnostic.Diagnostic
@@ -96,12 +97,31 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
     fun solveEqualities(constraints: Seq<Constraint>) {
         for (c in constraints) {
             if (c is Constraint.Equal) {
-                unify(c.t1, c.t2, c.pos, c.declPos)
+                unify(c.t1, c.t2, c.pos, c.declPos, c.useOrigin, c.declOrigin)
             }
         }
     }
 
-    private fun unify(a: Type, b: Type, pos: Span?, declPos: Span?) {
+    /**
+     * 合一两个类型。
+     *
+     * [aOrigin] / [bOrigin] 是与 [a] / [b] 结构对齐的来源树（见 [TypeOrigin]）：
+     * 递归拆解子项时一并下钻，报错时用**最精确的那一层**位置——于是
+     * `Option.Some("s")` 对 `Option<Int>` 的失配会指向 `"s"` 与 `Int`，
+     * 而不是整个实参与整个注解。
+     */
+    private fun unify(
+        a: Type,
+        b: Type,
+        pos: Span?,
+        declPos: Span?,
+        aOrigin: TypeOrigin? = null,
+        bOrigin: TypeOrigin? = null,
+    ) {
+        // 每层都把 label 收窄到本层的来源（拿不到就沿用上一层），保证下钻时定位单调变精确
+        val usePos = narrow(aOrigin, pos)
+        val declSite = narrow(bOrigin, declPos)
+
         val t1 = walk(a)
         val t2 = walk(b)
         when {
@@ -109,7 +129,7 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
 
             t1 is Type.Var -> {
                 if (occurs(t1, t2)) {
-                    reportOccurs(t1, pos, declPos)
+                    reportOccurs(t1, usePos, declSite)
                     return
                 }
                 bind(t1.index, t2)
@@ -117,7 +137,7 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
 
             t2 is Type.Var -> {
                 if (occurs(t2, t1)) {
-                    reportOccurs(t2, pos, declPos)
+                    reportOccurs(t2, usePos, declSite)
                     return
                 }
                 bind(t2.index, t1)
@@ -127,66 +147,96 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
                 if (t1.params.size != t2.params.size) {
                     report(
                         bundle.format("diag.arg-count-mismatch", t1.params.size, t2.params.size),
-                        pos,
-                        declPos
+                        usePos,
+                        declSite
                     )
                     return
                 }
                 for ((i, element) in t1.params.withIndex()) {
-                    unify(element, t2.params.get(i), pos, declPos)
+                    unify(element, t2.params.get(i), usePos, declSite, aOrigin?.childAt(i), bOrigin?.childAt(i))
                 }
-                unify(t1.result, t2.result, pos, declPos)
+                // 返回值排在形参之后（见 TypeOrigin 的子项下标约定）
+                val resultIndex = t1.params.size
+                unify(
+                    t1.result,
+                    t2.result,
+                    usePos,
+                    declSite,
+                    aOrigin?.childAt(resultIndex),
+                    bOrigin?.childAt(resultIndex),
+                )
             }
 
-            t1 is Type.Arr && t2 is Type.Arr -> unify(t1.element, t2.element, pos, declPos)
+            t1 is Type.Arr && t2 is Type.Arr ->
+                unify(t1.element, t2.element, usePos, declSite, aOrigin?.childAt(0), bOrigin?.childAt(0))
 
             // 泛型类型应用 `con<args...>`：构造器必须同名，实参数量必须一致，随后逐元素合一。
             // 支持嵌套泛型（`Array<Array<T>>` 与 `Array<Array<Int>>` 的合一）。
             t1 is Type.App && t2 is Type.App -> {
                 if (t1.con != t2.con) {
-                    reportMismatch(t1, t2, pos, declPos)
+                    reportMismatch(t1, t2, usePos, declSite)
                     return
                 }
                 if (t1.args.size != t2.args.size) {
                     report(
                         bundle.format("diag.type-arg-count", t1.con.name, t1.args.size, t2.args.size),
-                        pos,
-                        declPos
+                        usePos,
+                        declSite
                     )
                     return
                 }
                 for ((i, element) in t1.args.withIndex()) {
-                    unify(element, t2.args.get(i), pos, declPos)
+                    unify(element, t2.args.get(i), usePos, declSite, aOrigin?.childAt(i), bOrigin?.childAt(i))
                 }
             }
 
             // `Type.Arr` 是 `App(Con("Array"), [element])` 的语法糖（数组字面量推断产物是 Arr，
             // 注解/类型实参是 App），二者合一互相兼容。
-            t1 is Type.Arr && t2 is Type.App -> unifyArrApp(t1, t2, pos, declPos)
-            t1 is Type.App && t2 is Type.Arr -> unifyArrApp(t2, t1, pos, declPos)
+            // 来源随位置一起换边，保持「pos ↔ arr、declPos ↔ app」的既有对应。
+            t1 is Type.Arr && t2 is Type.App -> unifyArrApp(t1, t2, usePos, declSite, aOrigin, bOrigin)
+            t1 is Type.App && t2 is Type.Arr -> unifyArrApp(t2, t1, usePos, declSite, bOrigin, aOrigin)
 
             t1 is Type.TupleType && t2 is Type.TupleType -> {
                 if (t1.elements.size != t2.elements.size) {
-                    report(bundle.format("diag.tuple-count-mismatch", t1.elements.size, t2.elements.size), pos, declPos)
+                    report(bundle.format("diag.tuple-count-mismatch", t1.elements.size, t2.elements.size), usePos, declSite)
                     return
                 }
                 for ((i, element) in t1.elements.withIndex()) {
-                    unify(element, t2.elements.get(i), pos, declPos)
+                    unify(element, t2.elements.get(i), usePos, declSite, aOrigin?.childAt(i), bOrigin?.childAt(i))
                 }
             }
 
             // 错误类型 / 未定类型：静默通过（抑制级联错误，允许继续推断）
             t1 is Type.Error || t2 is Type.Error || t1 is Type.Unknown || t2 is Type.Unknown -> Unit
 
-            t1 != t2 -> reportMismatch(t1, t2, pos, declPos)
+            t1 != t2 -> reportMismatch(t1, t2, usePos, declSite)
         }
+    }
+
+    /**
+     * 取更精确的位置：只有来源 span 落在原 label 区间内（同文件、不更宽）时才采用，
+     * 否则退回 [fallback]——来源缺失或类型结构漂移时，诊断定位绝不会比原来更差。
+     */
+    private fun narrow(origin: TypeOrigin?, fallback: Span?): Span? {
+        val span = origin?.span ?: return fallback
+        if (fallback == null) return span
+        if (span.index() != fallback.index()) return fallback
+        if (span.start() >= fallback.start() && span.end() <= fallback.end()) return span
+        return fallback
     }
 
     /**
      * `Arr` 与 `App` 的兼容合一：`Type.Arr(element)` ≡ `Type.App(Con("Array"), [element])`。
      * 非 Array 构造器或实参数量不是 1 时报错。
      */
-    private fun unifyArrApp(arr: Type.Arr, app: Type.App, pos: Span?, declPos: Span?) {
+    private fun unifyArrApp(
+        arr: Type.Arr,
+        app: Type.App,
+        pos: Span?,
+        declPos: Span?,
+        arrOrigin: TypeOrigin?,
+        appOrigin: TypeOrigin?,
+    ) {
         if (app.con != BuiltinType.Array) {
             reportMismatch(arr, app, pos, declPos)
             return
@@ -195,7 +245,7 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
             report(bundle.format("diag.type-arg-count", BuiltinType.Array.name, 1, app.args.size), pos, declPos)
             return
         }
-        unify(arr.element, app.args.get(0), pos, declPos)
+        unify(arr.element, app.args.get(0), pos, declPos, arrOrigin?.childAt(0), appOrigin?.childAt(0))
     }
 
     /**

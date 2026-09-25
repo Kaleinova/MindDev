@@ -14,10 +14,7 @@ import mlogix.compiler.core.symbol.SymbolTable
 import mlogix.compiler.core.symbol.VariantPayload
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
-import mlogix.compiler.core.type.BuiltinType
-import mlogix.compiler.core.type.Type
-import mlogix.compiler.core.type.TypeScheme
-import mlogix.compiler.core.type.TypeVisitor
+import mlogix.compiler.core.type.*
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
 import mlogix.compiler.ir.ResolutionResult
@@ -44,6 +41,27 @@ class TypeInferencer(val context: CompilerContext) {
     /** 类型变量 → 声明位置：形参类型变量登记其注解 span，供调用处报错的声明方 label 使用 */
     private val varDeclSpans = ObjectMap<Int, Span>()
 
+    /**
+     * 函数定义 → 形参声明信息（与形参**下标**一一对应）。
+     *
+     * 两处用途：
+     * - 双向检查：把「注解类型 + 其来源」作为 [ExpectedType] 下推给实参（错误就地报在实参上）；
+     * - 报错定位：类型不匹配时给出声明方 label（可下钻到 `Option<Int>` 的 `Int`）。
+     *
+     * 与 [varDeclSpans] 的区别：后者按类型变量索引登记（只有形参类型恰好是变量时才查得到），
+     * 这里按下标登记，泛型函数里 `x: Option<T>` 这类非变量形参也能定位。
+     */
+    private val TypeAnnotations = ObjectMap<DefId, Seq<TypeAnnotation>>()
+
+    /** 泛型函数定义 → 它声明的类型参数变量：下推期望类型时要避开（跨调用点共享，下推会互相污染） */
+    private val fnTypeParamVars = ObjectMap<DefId, Seq<Type.Var>>()
+
+    /**
+     * 泛型定义（枚举 / 泛型函数）→ 声明的类型参数名。
+     * 供「显式类型实参数量不匹配」的 note 说明数量从哪来（`enum Option<T>` / `fn id<T>`）。
+     */
+    private val declaredTypeParamNames = ObjectMap<DefId, Seq<String>>()
+
     /** 泛型函数登记表：walk 阶段登记，求解完成后统一重建 TypeScheme（见 [analyze] 末尾） */
     private val genericFns = Seq<GenericFnInfo>(4)
 
@@ -66,6 +84,9 @@ class TypeInferencer(val context: CompilerContext) {
         constraints.clear()
         genericFns.clear()
         typeParamStack.clear()
+        TypeAnnotations.clear()
+        fnTypeParamVars.clear()
+        declaredTypeParamNames.clear()
 
         // walk AST and collect constraints
         analyzeStmt(result.ast)
@@ -106,6 +127,62 @@ class TypeInferencer(val context: CompilerContext) {
                     symbol.values.put("final", final)
                 }
             }
+        }
+    }
+
+    /**
+     * `set` 声明：推断初值、做符号类型快速传播，并把**类型注解**接进约束。
+     *
+     * 此前注解既不转类型也不参与检查（见旧 TODO），于是 `set a : Int = "s"`、
+     * `set a : Option<Int> = Option.Some("s")`、`set a : Array<Int> = {"x"}` 全部静默通过。
+     * 现在注解就是变量的声明方类型：
+     * - `set a : T = 初值` → 期望类型 `T` 下推给初值表达式（双向检查），
+     *   错误就地报在写出错误值的子表达式上（`{"x"}` 里报 `"x"`）；
+     * - `set a : T`（无初值）→ 变量类型即 T，后续 `a = ...` 按 T 检查。
+     *
+     * 注解只支持单一枚举值；`set a : Int | Str` 这类多枚举值仍由 [annotationToType] 报 union-not-supported。
+     */
+    private fun analyzeSetVarStmt(stmt: Stmt.SetVarStmt) {
+        val annotation = stmt.`var` as? Expr.Annotation
+        val declared = annotation?.let { TypeAnnotation(annotationToType(it), annotationToOrigin(it)) }
+        val symbol = unwrapIdentifier(stmt.`var`)?.defId?.let { symbolTable.get(it) }
+
+        val assign = stmt.assignStmt
+        if (assign == null) {
+            // `set a`：符号保持 Unknown；有注解则以注解为准
+            if (declared != null && symbol != null) symbol.type = declared.type
+            return
+        }
+
+        // 与 AssignStmt 相同的推断，但每个表达式只推断一次并做符号类型快速传播：
+        // 递归 analyzeStmt(assignStmt) 会让同一 RHS 被推断两次、其上的错误重复上报。
+        val lr = inferExpr(assign.`var`)
+        constraints.addAll(lr.constraints)
+        val valueR = inferExpr(assign.value, declared?.let { ExpectedType(it.type, it.origin) })
+        constraints.addAll(valueR.constraints)
+
+        if (symbol == null) return
+        if (declared != null) {
+            // 初值已就地消费期望类型（字面量/数组字面量/变体构造器）时跳过，避免重复报错。
+            // 使用方=初值类型（label 在初值处），声明方=注解类型（label 在注解处，可下钻到 `Int`）。
+            if (!valueR.expectedHandled) {
+                constraints.add(
+                    Constraint.Equal(
+                        valueR.type,
+                        declared.type,
+                        assign.value.span,
+                        declared.origin?.span,
+                        valueR.origin,
+                        declared.origin,
+                    )
+                )
+            }
+            // 变量类型以注解为准，后续语句直接按注解类型检查
+            symbol.type = declared.type
+        } else if (valueR.type != BuiltinType.Unknown) {
+            // 快速传播：后续语句读取该变量时能直接看到（推断出的）类型
+            // （如 `set a = 1; set b = a` 中 b 能看到 a 已是 Int）
+            symbol.type = valueR.type
         }
     }
 
@@ -172,13 +249,29 @@ class TypeInferencer(val context: CompilerContext) {
             }
 
             is Stmt.ReturnStmt -> {
-                val exprR = stmt.expr?.let { inferExpr(it) }
+                if (returnContextStack.isEmpty) {
+                    stmt.expr?.let { val r = inferExpr(it); constraints.addAll(r.constraints) }
+                    return
+                }
+                val context = returnContextStack.peek()
+                // 返回类型可下推时（注解不含本函数自己的类型参数）把期望类型交给返回值推断，
+                // 错误就地报在返回表达式上（如 `return Option.Some("s")` 报在 `"s"`）
+                val exprR = stmt.expr?.let { inferExpr(it, context.push) }
                 exprR?.let { constraints.addAll(it.constraints) }
-                if (!returnContextStack.isEmpty) {
-                    val context = returnContextStack.peek()
+                if (exprR == null || !exprR.expectedHandled) {
                     val returnType = exprR?.type ?: BuiltinType.Null
-                    // t1=实际返回类型(使用方)，t2=函数声明返回类型(声明方)，declPos=函数声明位置
-                    constraints.add(Constraint.Equal(returnType, context.expected, stmt.span, context.declSpan))
+                    // t1=实际返回类型(使用方)，t2=函数声明返回类型(声明方)，
+                    // declPos=返回类型注解处（无注解时为函数名位置）
+                    constraints.add(
+                        Constraint.Equal(
+                            returnType,
+                            context.expected,
+                            stmt.span,
+                            context.declSpan,
+                            exprR?.origin,
+                            context.expectedOrigin,
+                        )
+                    )
                 }
             }
 
@@ -211,32 +304,7 @@ class TypeInferencer(val context: CompilerContext) {
             }
 
             is Stmt.SetVarStmt -> {
-                val assign = stmt.assignStmt
-                if (assign == null) {
-                    // `set a`（无赋值）：符号保持 Unknown。
-                    // TODO: `set` 的类型注解尚未参与类型检查（既有行为，与泛型无关）：
-                    //  `set a : Int = "str"` 不会报错，`set a : Array<Int> = {1, 2}` 的元素类型也不被检查。
-                    //  接入方式：单枚举值注解转成 Type 并与符号类型加 Equal 约束（多枚举值走 union-not-supported）。
-                    return
-                }
-                // 与 AssignStmt 相同的推断，但每个表达式只推断一次并做符号类型快速传播：
-                // 递归 analyzeStmt(assignStmt) 会让同一 RHS 被推断两次、其上的错误重复上报。
-                val lr = inferExpr(assign.`var`)
-                constraints.addAll(lr.constraints)
-                val valueR = inferExpr(assign.value)
-                constraints.addAll(valueR.constraints)
-                // 快速传播：后续语句读取该变量时能直接看到（推断出的）类型
-                // （如 `set a = 1; set b = a` 中 b 能看到 a 已是 Int）
-                val varIdent = unwrapIdentifier(assign.`var`)
-                varIdent?.defId?.let { defId ->
-                    val symbol = symbolTable.get(defId)
-                    if (symbol != null && valueR.type != BuiltinType.Unknown) {
-                        symbol.type = valueR.type
-                    }
-                }
-                // TODO: `set` 的类型注解尚未参与类型检查（既有行为，与泛型无关）：
-                //  `set a : Int = "str"` 不会报错，`set a : Array<Int> = {1, 2}` 的元素类型也不被检查。
-                //  接入方式：单枚举值注解转成 Type 并与符号类型加 Equal 约束（多枚举值走 union-not-supported）。
+                analyzeSetVarStmt(stmt)
             }
 
             is Stmt.EnumStmt -> {
@@ -281,6 +349,8 @@ class TypeInferencer(val context: CompilerContext) {
         // 声明处嵌套 `E<U>`（高阶类型）已在 Resolver 报错，这里按声明顺序只绑定头部名字。
         val typeParamVars = Seq<Type.Var>(typeParams?.size ?: 0)
         if (typeParams != null && isGeneric) {
+            // 登记类型参数名，供「显式类型实参数量不匹配」的 note 指向声明处
+            declaredTypeParamNames.put(fnSymbol.id, typeParamNamesOf(typeParams))
             for (typeParam in typeParams) {
                 val v = solver.freshVar()
                 typeParamVars.add(v)
@@ -292,12 +362,14 @@ class TypeInferencer(val context: CompilerContext) {
             }
         }
 
-        // 形参类型
+        // 形参类型（形参声明信息与下标一一对应：注解类型 + 来源，供期望类型下推与声明方 label）
         val paramTypes = Seq<Type>(8)
+        val TypeAnnotationInfo = Seq<TypeAnnotation>(stmt.params?.size ?: 0)
         stmt.params?.let { params ->
             for (p in params) {
                 if (p is Expr.Annotation) {
                     val declType = annotationToType(p)
+                    TypeAnnotationInfo.add(TypeAnnotation(declType, annotationToOrigin(p)))
                     if (isGeneric) {
                         // 泛型函数：注解类型直接作为形参类型（`x: T` → T 的变量）
                         paramTypes.add(declType)
@@ -315,18 +387,34 @@ class TypeInferencer(val context: CompilerContext) {
                 } else {
                     // 无注解：fresh 变量（泛型函数中它会并入暂挂 scheme 的 typeVars）
                     paramTypes.add(solver.freshVar())
+                    TypeAnnotationInfo.add(TypeAnnotation.None)
                 }
             }
         }
+        // 形参声明按下标登记（不像 varDeclSpans 那样按类型变量索引：泛型函数的形参类型可能不是变量）
+        if (!TypeAnnotationInfo.isEmpty) TypeAnnotations.put(fnSymbol.id, TypeAnnotationInfo)
+        if (isGeneric) fnTypeParamVars.put(fnSymbol.id, typeParamVars)
 
         // 返回值类型：无注解 → fresh 变量；单一返回值有注解 → 注解类型（泛型）或 Equal 约束（非泛型）。
         // 多返回值（`-> a: T1, b: T2`）尚未建模（Type.Func 只有单一 result），暂不约束。
         var resultType: Type = solver.freshVar()
+        var resultOrigin: TypeOrigin? = null
+        // 返回值也可下推期望类型（`return Option.Some("s")` 对 `-> r : Option<Int>`），
+        // 但注解含本函数自己的类型参数时不下推（那些变量跨调用点共享）
+        var resultPush: ExpectedType? = null
+        // 返回类型不匹配时的声明方 label：有注解就指注解本身（`-> r : Int` 的 `Int`），
+        // 否则退回函数名位置（那里是函数的声明处）
+        var resultDeclSpan: Span = stmt.name?.span ?: stmt.span
         stmt.results?.let { results ->
             if (results.size == 1) {
                 val result = results[0]
                 if (result is Expr.Annotation) {
                     val declType = annotationToType(result)
+                    resultOrigin = annotationToOrigin(result)
+                    resultDeclSpan = result.span
+                    if (!isGeneric || !mentionsAnyVar(declType, typeParamVars)) {
+                        resultPush = ExpectedType(declType, resultOrigin)
+                    }
                     if (isGeneric) {
                         resultType = declType
                         registerVarSpan(declType, result.span)
@@ -350,7 +438,7 @@ class TypeInferencer(val context: CompilerContext) {
         }
 
         // analyze body with parameters bound
-        returnContextStack.add(ReturnContext(resultType, stmt.name?.span ?: stmt.span))
+        returnContextStack.add(ReturnContext(resultType, resultDeclSpan, resultOrigin, resultPush))
         stmt.params?.let { params ->
             for ((i, p) in params.withIndex()) {
                 val ident = unwrapIdentifier(p)
@@ -391,6 +479,8 @@ class TypeInferencer(val context: CompilerContext) {
         val typeParams = stmt.typeParams
         val typeParamVars = Seq<Type.Var>(typeParams?.size ?: 0)
         if (typeParams != null) {
+            // 登记类型参数名，供「显式类型实参数量不匹配」的 note 指向声明处
+            declaredTypeParamNames.put(enumSymbol.id, typeParamNamesOf(typeParams))
             for (typeParam in typeParams) {
                 val v = solver.freshVar()
                 typeParamVars.add(v)
@@ -416,11 +506,11 @@ class TypeInferencer(val context: CompilerContext) {
             val fields = stmt.fieldsOf(variant)
             val payloadTypes = Seq<Type>(fields.size)
             val payloadNames = Seq<String>(fields.size)
-            val payloadSpans = Seq<Span>(fields.size)
+            val payloadOrigins = Seq<TypeOrigin>(fields.size)
             for (field in fields) {
                 payloadTypes.add(variantFieldToType(field))
                 payloadNames.add(variantFieldNameOf(field))
-                payloadSpans.add(field.span)
+                payloadOrigins.add(variantFieldOrigin(field))
             }
 
             val variantType: Type =
@@ -429,8 +519,112 @@ class TypeInferencer(val context: CompilerContext) {
             variantSymbol.type = variantType
             // 类型方案：量化的类型参数在每个访问点实例化为 fresh 变量
             variantSymbol.typeScheme = TypeScheme(typeParamVars, variantType)
-            variantSymbol.values.put(Symbol.VARIANT_PAYLOAD_KEY, VariantPayload(payloadNames, payloadSpans))
+            variantSymbol.values.put(Symbol.VARIANT_PAYLOAD_KEY, VariantPayload(payloadNames, payloadOrigins))
         }
+    }
+
+    /**
+     * 标识符推断（不含期望类型消费；消费由 [inferExpr] 统一包装）。
+     *
+     * 变量的来源就是它的使用位置：作为「使用方」下钻到最里层时，label 指向这里的引用。
+     */
+    private fun inferIdentifier(expr: Expr.Identifier): InferResult {
+        val origin = TypeOrigin(expr.span)
+        val defId = expr.defId
+        if (defId == null) {
+            // Resolver 已报 diag.undeclared-identifier（名称解析归它管），
+            // 这里静默降级为 Error，避免同一错误重复上报。
+            return InferResult(BuiltinType.Error, Seq(0), origin)
+        }
+        val symbol = symbolTable.get(defId) ?: return InferResult(BuiltinType.Unknown, Seq(0), origin)
+        if (symbol.values.get(Symbol.TYPE_PARAM_KEY) == true) {
+            // 类型参数只能出现在类型位置（注解/类型实参），不能作为值使用
+            error(bundle.format("diag.type-param-as-value", symbol.name))
+                .label(expr, "")
+            return InferResult(BuiltinType.Error, Seq(0), origin)
+        }
+        if (symbol.values.get(Symbol.ENUM_KEY) == true) {
+            // 枚举类型名只能用来访问变体（`Color.Red`），不能当值；变体的类型就是枚举类型
+            error(bundle.format("diag.enum-as-value", symbol.name))
+                .label(expr, bundle.format("diag.enum-as-value.help", symbol.name))
+            return InferResult(BuiltinType.Error, Seq(0), origin)
+        }
+        // 泛型函数（或值位置携带显式类型实参）：按调用点实例化类型方案，
+        // 每次引用得到独立的类型变量（多态）。
+        val explicitArgs = expr.typeArgs
+        val hasExplicit = explicitArgs != null && !explicitArgs.isEmpty
+        val declaredCount = symbol.values.get(Symbol.TYPE_PARAM_COUNT_KEY) as? Int ?: 0
+        if (!symbol.typeScheme.typeVars.isEmpty || declaredCount != 0 || hasExplicit) {
+            return InferResult(instantiateScheme(symbol, expr, declaredCount), Seq(0), origin)
+        }
+        var ty = symbol.type
+        if (ty == BuiltinType.Unknown) {
+            // create type variable to be inferred
+            ty = solver.freshVar()
+            symbol.values.put("inferred", ty)
+        }
+        return InferResult(ty, Seq(0), origin)
+    }
+
+    /**
+     * 叶子表达式就地消费期望类型：加一条「实际 = 期望」的约束（双方都带来源，便于收窄 label），
+     * 并标记 [InferResult.expectedHandled]，调用方不再重复加约束。
+     */
+    private fun withExpectedCheck(result: InferResult, expected: ExpectedType, span: Span): InferResult {
+        val combined = Seq<Constraint>(result.constraints.size + 1)
+        combined.addAll(result.constraints)
+        combined.add(
+            Constraint.Equal(result.type, expected.type, span, expected.span, result.origin, expected.origin)
+        )
+        return InferResult(result.type, combined, result.origin, true)
+    }
+
+    /** 期望类型是数组时的元素期望（`Array<T>` / `Arr(T)`）；不是数组则为 null */
+    private fun expectedElementOf(expected: ExpectedType): ExpectedType? = when (val type = expected.type) {
+        is Type.Arr -> ExpectedType(type.element, expected.origin?.childAt(0))
+        is Type.App ->
+            if (type.con == BuiltinType.Array && type.args.size == 1) {
+                ExpectedType(type.args.get(0), expected.origin?.childAt(0))
+            } else {
+                null
+            }
+
+        else -> null
+    }
+
+    /**
+     * 期望类型能否安全下推给被调用方的实参：注解类型已知，且**不含**被调用函数自己量化的类型参数
+     * （那些变量跨调用点共享，下推会让不同调用互相污染；此时退回原有的约束式检查）。
+     */
+    private fun pushableExpected(decl: TypeAnnotation?, calleeDefId: DefId?): ExpectedType? {
+        if (decl == null || !decl.isPresent) return null
+        val typeParams = calleeDefId?.let { fnTypeParamVars.get(it) }
+        if (typeParams != null && mentionsAnyVar(decl.type, typeParams)) return null
+        return ExpectedType(decl.type, decl.origin)
+    }
+
+    /** [type] 中是否出现 [vars] 里的任一类型变量 */
+    private fun mentionsAnyVar(type: Type, vars: Seq<Type.Var>): Boolean {
+        if (vars.isEmpty) return false
+        val wanted = ObjectMap<Int, Boolean>()
+        for (v in vars) wanted.put(v.index, true)
+        var found = false
+        type.accept(object : TypeVisitor {
+            override fun visitVar(type: Type.Var) {
+                if (wanted.containsKey(type.index)) found = true
+            }
+        })
+        return found
+    }
+
+
+    /**
+     * 变体载荷字段的类型来源（与 [variantFieldToType] 同构）：
+     * 结构体变体取冒号后类型表达式的来源（`height: Num` → `Num`），元组变体取类型表达式本身。
+     */
+    private fun variantFieldOrigin(field: Expr): TypeOrigin = when (field) {
+        is Expr.Annotation -> annotationToOrigin(field)
+        else -> variantToOrigin(field)
     }
 
     /**
@@ -460,6 +654,13 @@ class TypeInferencer(val context: CompilerContext) {
     private fun identifierNameOf(identifier: Expr.Identifier): String =
         (identifier.token.literal as? String) ?: identifier.token.type.toString()
 
+    /** 声明的类型参数名（`enum Option<T, E>` → `[T, E]`），供诊断说明声明处 */
+    private fun typeParamNamesOf(typeParams: Seq<Expr.Identifier>): Seq<String> {
+        val names = Seq<String>(typeParams.size)
+        for (typeParam in typeParams) names.add(identifierNameOf(typeParam))
+        return names
+    }
+
     /**
      * 若 [expr] 是「枚举名.变体」访问（`field` 的 [DefId] 由 Resolver 填为变体符号），返回变体符号。
      */
@@ -485,8 +686,14 @@ class TypeInferencer(val context: CompilerContext) {
         val declaredCount = variantSymbol.typeScheme.typeVars.size
         val argCount = explicitArgs?.size ?: 0
         if (argCount != 0 && argCount != declaredCount) {
-            error(bundle.format("diag.explicit-type-arg-count", declaredCount, argCount))
-                .label(at, bundle.format("diag.explicit-type-arg-count.help", declaredCount))
+            // label 只圈住写出类型实参的那一段（`Option<Int, Str>`），
+            // 而不是整个变体访问（`Option<Int, Str>.Some`）
+            val typeArgSite: Expr = (at as? Expr.Get)?.obj ?: at
+            val ownerDefId = (typeArgSite as? Expr.Identifier)?.defId
+            val diagnostic = error(bundle.format("diag.explicit-type-arg-count", declaredCount, argCount))
+                .label(typeArgSite, bundle.format("diag.explicit-type-arg-count.help", declaredCount))
+            noteTypeParamSource(diagnostic, ownerDefId, declaredCount)
+            labelExtraTypeArgs(diagnostic, explicitArgs, declaredCount)
             return variantSymbol.typeScheme.instantiateWith(Seq<Type>(0)) { solver.freshVar() }
         }
         if (argCount == 0) {
@@ -498,17 +705,83 @@ class TypeInferencer(val context: CompilerContext) {
     }
 
     /**
+     * 给「显式类型实参数量不匹配」补上**逐个多余实参**的修复建议
+     * （对应 rustc E0107 的 `help: remove this generic argument`）：
+     * 一条 `help` 带若干删除 label，渲染成可照着改的 `-` 标记。
+     *
+     * 不额外挂"多余实参"次级 label：它必然落在主 label（整个类型表达式）区间内，
+     * 而渲染器会丢弃同一行重叠的 label（见 [mlogix.compiler.diagnostic.Diagnostic.renderLine]），
+     * 徒增噪音；指向具体实参的职责由 help 的删除标记承担。
+     *
+     * 实参不足时**不**给代码建议：本语言没有 `_` 类型占位符，插入任何写法都会引入新错误，
+     * 只在主 label 的文案里提示「传恰好 N 个，或不传以全部推断」。
+     */
+    private fun labelExtraTypeArgs(
+        diagnostic: Diagnostic,
+        explicitArgs: Seq<Expr.Identifier>?,
+        declaredCount: Int,
+    ) {
+        if (explicitArgs == null) return
+        val extras = Seq<Expr.Identifier>(0)
+        for ((i, arg) in explicitArgs.withIndex()) {
+            if (i >= declaredCount) extras.add(arg)
+        }
+        if (extras.isEmpty) return
+
+        val help = diagnostic.help(bundle.format("diag.explicit-type-arg-count.remove-extra", extras.size))
+        for (extra in extras) help.delete(extra)
+    }
+
+    /**
+     * 给「显式类型实参数量不匹配」补一条 note：泛型定义在哪儿、声明了几个（哪些）类型参数。
+     *
+     * 对应 rustc 的 `note: struct defined here, with 1 generic parameter: T`：
+     * note 自带 label，渲染成指向声明处的代码片段。
+     *
+     * @param ownerDefId 泛型定义的 [DefId]（枚举 / 泛型函数）；拿不到来源时不加 note
+     */
+    private fun noteTypeParamSource(diagnostic: Diagnostic, ownerDefId: DefId?, declaredCount: Int) {
+        val owner = ownerDefId?.let { symbolTable.get(it) } ?: return
+        val names = declaredTypeParamNames.get(owner.id) ?: return
+        val namesText = names.joinToString(", ") { "`$it`" }
+        diagnostic
+            .note(bundle.format("diag.explicit-type-arg-count.note", owner.name, declaredCount, namesText))
+            .label(owner.span, "")
+    }
+
+    /**
      * `枚举名.变体(实参...)`：按变体载荷检查实参并产出枚举类型。
      *
      * 与普通调用不同：载荷类型就是构造器形参，不需要「结构链接」再逐实参约束，
      * 因此数量不符能给出变体专属报错，类型不符能带上字段声明方位置（声明方 label）。
+     *
+     * 双向检查：若 [expected] 与本变体同属一个枚举（`Option<Int>` 对 `Option.Some(...)`），
+     * 则**采用期望类型作为结果**，并把期望的类型实参按「直接出现」的映射下推到对应载荷实参，
+     * 于是 `Option.Some("s")` 对 `Option<Int>` 的错误就报在 `"s"` 上（不再依赖事后收窄）。
      */
-    private fun inferEnumVariantCall(call: Expr.Call, variantSymbol: Symbol): InferResult {
+    private fun inferEnumVariantCall(
+        call: Expr.Call,
+        variantSymbol: Symbol,
+        expected: ExpectedType?,
+    ): InferResult {
         val explicitArgs = (call.callee as? Expr.Get)?.let { (it.obj as? Expr.Identifier)?.typeArgs }
         val constructorType = instantiateVariant(variantSymbol, call.callee, explicitArgs)
         val payloadTypes = (constructorType as? Type.Func)?.params ?: Seq<Type>(0)
         val enumType = (constructorType as? Type.Func)?.result ?: constructorType
         val payload = variantSymbol.values.get(Symbol.VARIANT_PAYLOAD_KEY) as? VariantPayload
+
+        val enumApp = enumType as? Type.App
+        val expectedApp = expected?.type as? Type.App
+        // 期望类型与本变体同属一个枚举、且类型实参数量一致时：采用期望作为结果，并把期望的类型实参下推
+        val adoptedTypeArgs: Seq<Type>? =
+            if (enumApp != null && expectedApp != null &&
+                expectedApp.con == enumApp.con && expectedApp.args.size == enumApp.args.size
+            ) {
+                expectedApp.args
+            } else {
+                null
+            }
+        val resultType = adoptedTypeArgs?.let { expected?.type ?: enumType } ?: enumType
 
         val combined = Seq<Constraint>(0)
         if (payloadTypes.size != call.args.size) {
@@ -525,14 +798,104 @@ class TypeInferencer(val context: CompilerContext) {
             )
         }
 
+        val argOrigins = Seq<TypeOrigin>(call.args.size)
         for ((i, arg) in call.args.withIndex()) {
-            val r = inferExpr(arg)
+            // 载荷位 → 对应的枚举类型实参（直接出现）→ 该位实参的期望类型
+            val pushed = if (adoptedTypeArgs != null && enumApp != null) {
+                directPayloadExpectation(payloadTypes, i, enumApp.args, adoptedTypeArgs, expected?.origin)
+            } else {
+                null
+            }
+            val r = inferExpr(arg, pushed)
             combined.addAll(r.constraints)
-            if (i < payloadTypes.size) {
-                combined.add(Constraint.Equal(r.type, payloadTypes[i], arg.span, payload?.spans?.get(i)))
+            // 下标对齐地收集实参来源，供构造结果的来源树把类型实参映射回实参表达式
+            argOrigins.add(r.origin ?: TypeOrigin.Unknown)
+            // 实参内部已消费期望时不再重复加约束（那次比较已在实参里完成）
+            if (i < payloadTypes.size && !r.expectedHandled) {
+                // 有期望可下推时按**期望类型**比较（否则实参没消费期望就会漏检，见下方 adopted 说明）
+                val declType = pushed?.type ?: payloadTypes.get(i)
+                val declSpan = pushed?.span ?: payload?.spanOf(i)
+                val declOrigin = pushed?.origin ?: payload?.originAt(i)
+                combined.add(Constraint.Equal(r.type, declType, arg.span, declSpan, r.origin, declOrigin))
             }
         }
-        return InferResult(enumType, combined)
+
+        // 采用期望类型后，枚举自身的类型实参也要与期望对齐：结果类型已经**就是**期望类型，
+        // 调用方不会再比较一次，所以「未下推」的位置（如 `Cons(T, List<T>)` 里的 T、
+        // 或载荷类型不含该实参的变体）必须在这里兜底，否则这些位置的不匹配会漏报。
+        if (adoptedTypeArgs != null && enumApp != null) {
+            for ((j, typeArg) in enumApp.args.withIndex()) {
+                val expectedOrigin = expected?.origin?.childAt(j)
+                combined.add(
+                    Constraint.Equal(
+                        typeArg,
+                        adoptedTypeArgs.get(j),
+                        call.span,
+                        expectedOrigin?.span,
+                        null,
+                        expectedOrigin,
+                    )
+                )
+            }
+        }
+
+        return InferResult(
+            resultType,
+            combined,
+            enumCallOrigin(enumType, payloadTypes, call, argOrigins),
+            adoptedTypeArgs != null,
+        )
+    }
+
+    /**
+     * 载荷第 [payloadIndex] 位的期望类型：仅当该载荷类型**正好等于**某个枚举类型实参
+     * （`Some(T)` 这种直接出现）时才下推；更深嵌套（`Cons(T, List<T>)` 里的 T）不下推，
+     * 由原有的粗载荷约束兜底。
+     */
+    private fun directPayloadExpectation(
+        payloadTypes: Seq<Type>,
+        payloadIndex: Int,
+        enumTypeArgs: Seq<Type>,
+        expectedTypeArgs: Seq<Type>,
+        expectedOrigin: TypeOrigin?,
+    ): ExpectedType? {
+        if (payloadIndex >= payloadTypes.size) return null
+        val payloadType = payloadTypes.get(payloadIndex)
+        for ((j, typeArg) in enumTypeArgs.withIndex()) {
+            if (typeArg == payloadType && j < expectedTypeArgs.size) {
+                return ExpectedType(expectedTypeArgs.get(j), expectedOrigin?.childAt(j))
+            }
+        }
+        return null
+    }
+
+    /**
+     * 变体构造结果的来源树：把「枚举类型实参」映射回写出它的那个载荷实参。
+     *
+     * 只映射**直接出现**的类型参数（`Some(T)`：载荷类型正好等于某个枚举类型实参）——
+     * 这样 `Option<Int>` × `Option.Some("s")` 下钻到最内层时，使用方 label 能落到 `"s"`。
+     * 更深的嵌套（`Cons(T, List<T>)` 里的 T）与单元变体（类型实参没有对应源码）用
+     * [TypeOrigin.Unknown] 占位，保证下标对齐，求解器遇到它时保持上一层定位。
+     */
+    private fun enumCallOrigin(
+        enumType: Type,
+        payloadTypes: Seq<Type>,
+        call: Expr.Call,
+        argOrigins: Seq<TypeOrigin>,
+    ): TypeOrigin {
+        val typeArgs = (enumType as? Type.App)?.args ?: return TypeOrigin(call.span)
+        val children = Seq<TypeOrigin>(typeArgs.size)
+        for (typeArg in typeArgs) {
+            var child = TypeOrigin.Unknown
+            for ((i, payloadType) in payloadTypes.withIndex()) {
+                if (payloadType == typeArg && i < argOrigins.size) {
+                    child = argOrigins.get(i)
+                    break
+                }
+            }
+            children.add(child)
+        }
+        return TypeOrigin(call.span, children)
     }
 
     /**
@@ -556,68 +919,44 @@ class TypeInferencer(val context: CompilerContext) {
         return result
     }
 
-    private fun inferExpr(expr: Expr?): InferResult {
+    /**
+     * 推断一个表达式。
+     *
+     * @param expected 自上而下的期望类型（双向检查，见 [ExpectedType]）；为 null 表示纯自下而上推断。
+     *   能结构化消费期望的分支（字面量/标识符/数组字面量/变体构造器）会就地完成比较并置
+     *   [InferResult.expectedHandled]，调用方据此跳过重复的兜底约束。
+     */
+    private fun inferExpr(expr: Expr?, expected: ExpectedType? = null): InferResult {
         if (expr == null) return InferResult(BuiltinType.Unknown, Seq<Constraint>(0))
 
         return when (expr) {
-            is Expr.Literal -> InferResult(BuiltinType.toType(expr.token.type), Seq(0))
+            is Expr.Literal -> {
+                val result = InferResult(BuiltinType.toType(expr.token.type), Seq(0), TypeOrigin(expr.span))
+                if (expected == null) result else withExpectedCheck(result, expected, expr.span)
+            }
 
             is Expr.Identifier -> {
-                val defId = expr.defId
-                if (defId == null) {
-                    // Resolver 已报 diag.undeclared-identifier（名称解析归它管），
-                    // 这里静默降级为 Error，避免同一错误重复上报。
-                    InferResult(BuiltinType.Error, Seq(0))
-                } else {
-                    val symbol = symbolTable.get(defId)
-                    if (symbol == null) {
-                        InferResult(BuiltinType.Unknown, Seq(0))
-                    } else if (symbol.values.get(Symbol.TYPE_PARAM_KEY) == true) {
-                        // 类型参数只能出现在类型位置（注解/类型实参），不能作为值使用
-                        error(bundle.format("diag.type-param-as-value", symbol.name))
-                            .label(expr, "")
-                        InferResult(BuiltinType.Error, Seq(0))
-                    } else if (symbol.values.get(Symbol.ENUM_KEY) == true) {
-                        // 枚举类型名只能用来访问变体（`Color.Red`），不能当值；变体的类型就是枚举类型
-                        error(bundle.format("diag.enum-as-value", symbol.name))
-                            .label(expr, bundle.format("diag.enum-as-value.help", symbol.name))
-                        InferResult(BuiltinType.Error, Seq(0))
-                    } else {
-                        // 泛型函数（或值位置携带显式类型实参）：按调用点实例化类型方案，
-                        // 每次引用得到独立的类型变量（多态）。
-                        val explicitArgs = expr.typeArgs
-                        val hasExplicit = explicitArgs != null && !explicitArgs.isEmpty
-                        val declaredCount = symbol.values.get(Symbol.TYPE_PARAM_COUNT_KEY) as? Int ?: 0
-                        if (!symbol.typeScheme.typeVars.isEmpty || declaredCount != 0 || hasExplicit) {
-                            InferResult(instantiateScheme(symbol, expr, declaredCount), Seq(0))
-                        } else {
-                            var ty = symbol.type
-                            if (ty == BuiltinType.Unknown) {
-                                // create type variable to be inferred
-                                ty = solver.freshVar()
-                                symbol.values.put("inferred", ty)
-                            }
-                            InferResult(ty, Seq(0))
-                        }
-                    }
-                }
+                val result = inferIdentifier(expr)
+                if (expected == null) result else withExpectedCheck(result, expected, expr.span)
             }
 
             is Expr.Tuple -> {
-                // 元组：逐元素推断，产出 Type.TupleType
+                // 元组：逐元素推断，产出 Type.TupleType；子项来源按下标对齐（元组元素失配时能指向具体元素）
                 val combined = Seq<Constraint>(0)
                 val elementTypes = Seq<Type>(0)
+                val elementOrigins = Seq<TypeOrigin>(expr.elements.size)
                 for (e in expr.elements) {
                     val r = inferExpr(e)
                     combined.addAll(r.constraints)
                     elementTypes.add(r.type)
+                    elementOrigins.add(r.origin ?: TypeOrigin.Unknown)
                 }
-                InferResult(Type.TupleType(elementTypes), combined)
+                InferResult(Type.TupleType(elementTypes), combined, TypeOrigin(expr.span, elementOrigins))
             }
 
             is Expr.Annotation -> {
-                val r = inferExpr(expr.expr)
-                InferResult(r.type, r.constraints)
+                val r = inferExpr(expr.expr, expected)
+                InferResult(r.type, r.constraints, r.origin, r.expectedHandled)
             }
 
             is Expr.Unary -> {
@@ -652,16 +991,30 @@ class TypeInferencer(val context: CompilerContext) {
             }
 
             is Expr.Array -> {
-                // 数组字面量：所有元素统一为一个元素类型，产出 Type.Arr(elementType)
+                // 数组字面量：所有元素统一为一个元素类型，产出 Type.Arr(elementType)。
+                // 期望是数组（`Array<T>` / `Arr(T)`）时元素类型**直接取期望的元素类型**，
+                // 于是元素错误就地报在出错的那个元素上（而不是整个数组字面量）。
+                val expectedElement = expected?.let { expectedElementOf(it) }
+                val elementType = expectedElement?.type ?: solver.freshVar()
                 val combined = Seq<Constraint>(0)
-                val elemVar = solver.freshVar()
                 for (e in expr.elements) {
-                    val r = inferExpr(e)
+                    val r = inferExpr(e, expectedElement)
                     combined.addAll(r.constraints)
-                    // 使用方=元素实际类型，声明方=统一的元素类型变量
-                    combined.add(Constraint.Equal(r.type, elemVar, e.span))
+                    // 元素内部已消费期望时不再重复加元素约束
+                    if (!r.expectedHandled) {
+                        combined.add(
+                            Constraint.Equal(
+                                r.type,
+                                elementType,
+                                e.span,
+                                expectedElement?.span,
+                                r.origin,
+                                expectedElement?.origin,
+                            )
+                        )
+                    }
                 }
-                InferResult(Type.Arr(elemVar), combined)
+                InferResult(Type.Arr(elementType), combined, null, expectedElement != null)
             }
 
             is Expr.Index -> {
@@ -687,48 +1040,56 @@ class TypeInferencer(val context: CompilerContext) {
             is Expr.Call -> {
                 // `枚举名.变体(...)`：变体构造器调用，直接按载荷检查实参
                 val variantSymbol = enumVariantSymbolOf(expr.callee)
-                if (variantSymbol != null) return inferEnumVariantCall(expr, variantSymbol)
+                if (variantSymbol != null) return inferEnumVariantCall(expr, variantSymbol, expected)
 
                 val callee = inferExpr(expr.callee)
                 val combined = Seq<Constraint>(0)
                 combined.addAll(callee.constraints)
                 // 类型实参挂在 callee 的 Identifier 上（`foo<Int>(...)`），由 inferExpr(Identifier)
 
-                // 实参类型：逐个推断
-                val argTypes = Seq<Type>(expr.args.size)
-                for (a in expr.args) {
-                    val ar = inferExpr(a)
-                    combined.addAll(ar.constraints)
-                    argTypes.add(ar.type)
-                }
+                // 若 callee 是已知具名函数：取形参声明位置与声明信息（后者用于期望类型下推）
+                val calleeInfo = TypeAnnotationSpansOf(expr.callee)
+                val calleeDecls = TypeAnnotationsOf(expr.callee)
+                val calleeDefId = (expr.callee as? Expr.Identifier)?.defId
 
-                // 若 callee 是已知具名函数：取「函数名位置 + 形参声明位置列表」用于报错定位
-                val calleeInfo = paramDeclSpansOf(expr.callee)
+                // 实参：逐个推断；注解类型已知时把「期望类型」下推，错误就地报在实参子表达式上
+                val argResults = Seq<InferResult>(expr.args.size)
+                for ((i, a) in expr.args.withIndex()) {
+                    val declared = if (calleeDecls != null && i < calleeDecls.size) calleeDecls.get(i) else null
+                    val ar = inferExpr(a, pushableExpected(declared, calleeDefId))
+                    combined.addAll(ar.constraints)
+                    argResults.add(ar)
+                }
 
                 // 1) 结构链接：callee 必须是「实参数量对应的函数类型」。
                 //    每个形参用 fresh 变量占位，等待与实参逐一约束。
                 //    t1=调用处合成的函数类型（使用方/实际），t2=函数声明类型（声明方/期望）。
-                val paramVars = Seq<Type>(argTypes.size)
-                repeat(argTypes.size) { paramVars.add(solver.freshVar()) }
+                val paramVars = Seq<Type>(argResults.size)
+                repeat(argResults.size) { paramVars.add(solver.freshVar()) }
                 val resVar = solver.freshVar()
                 val fnType = Type.Func(paramVars, resVar)
                 combined.add(Constraint.Equal(fnType, callee.type, expr.callee.span, calleeInfo?.first))
 
                 // 2) 逐实参约束：使用方=实参自身 span（label），声明方=形参注解位置（label）。
                 //    这样每个不匹配的实参单独报错，而不是整个 Call 一个错误。
-                val paramDeclSpans = calleeInfo?.second
-                val declSpanCount = paramDeclSpans?.size ?: 0
-                for ((i, element) in argTypes.withIndex()) {
+                //    实参已消费期望类型时跳过（那次比较在实参内部已完成，避免重复报错）。
+                val TypeAnnotationSpans = calleeInfo?.second
+                val declSpanCount = TypeAnnotationSpans?.size ?: 0
+                val declCount = calleeDecls?.size ?: 0
+                for ((i, ar) in argResults.withIndex()) {
+                    if (ar.expectedHandled) continue
                     // 实参数量可能超过形参声明数量（结构链接约束会另行报「参数数量不匹配」），
                     // 越界的实参没有对应形参声明位置 → declSpan 取 null（退化为仅使用方 label）。
-                    // （paramDeclSpans 为 null 时 declSpanCount=0，`i < 0` 恒假，?. 保证不越界）
-                    val declSpan = if (i < declSpanCount) paramDeclSpans?.get(i) else null
+                    val declSpan = if (i < declSpanCount) TypeAnnotationSpans?.get(i) else null
+                    val declOrigin = if (i < declCount) calleeDecls?.get(i)?.origin else null
                     combined.add(
                         Constraint.Equal(
-                            element,
+                            ar.type,
                             paramVars[i],
                             expr.args[i].span,
                             declSpan,
+                            ar.origin,
+                            declOrigin,
                         )
                     )
                 }
@@ -825,6 +1186,41 @@ class TypeInferencer(val context: CompilerContext) {
 
             else -> Type.Error
         }
+    }
+
+    /**
+     * 类型注解 → 来源树（与 [annotationToType] 同构，纯诊断用途，见 [TypeOrigin]）。
+     *
+     * 多个枚举值（`A | B`）已由 [annotationToType] 报「暂不支持」，这里退化为整体注解、不参与下钻。
+     */
+    private fun annotationToOrigin(annotation: Expr.Annotation): TypeOrigin {
+        val variants = annotation.annotations
+        if (variants.size != 1) return TypeOrigin(annotation.span)
+        return variantToOrigin(variants[0])
+    }
+
+    /**
+     * 单个枚举值表达式 → 来源树（与 [variantToType] 同构）：
+     * 根 span 是**类型表达式本身**（`x: Option<Int>` 里是 `Option<Int>`，不含形参名与冒号），
+     * 子项依类型实参展开。
+     */
+    private fun variantToOrigin(expr: Expr): TypeOrigin = when (expr) {
+        is Expr.Identifier -> identifierOrigin(expr)
+        is Expr.Tuple -> TypeOrigin(expr.span, expr.elements.map { variantToOrigin(it) })
+        else -> TypeOrigin(expr.span)
+    }
+
+    /**
+     * 类型标识符 → 来源树：根 span = 该类型表达式（`Array<Int>`），
+     * 子项 = 各类型实参的来源（`Array<Int>` 的 `Int`），与 `Type.App` 的子项同序。
+     *
+     * 裸 `Array` 会被转成 `App(Array, [?])`（多一个子项而无源码可指），
+     * 下钻时子项越界 → 求解器退化为根 span，即 `Array` 本身。
+     */
+    private fun identifierOrigin(expr: Expr.Identifier): TypeOrigin {
+        val args = expr.typeArgs
+        if (args == null || args.isEmpty) return TypeOrigin(expr.span)
+        return TypeOrigin(expr.span, args.map { identifierOrigin(it) })
     }
 
     /**
@@ -930,8 +1326,10 @@ class TypeInferencer(val context: CompilerContext) {
         val explicitArgs = expr.typeArgs
         val argCount = explicitArgs?.size ?: 0
         if (argCount != 0 && argCount != declaredCount) {
-            error(bundle.format("diag.explicit-type-arg-count", declaredCount, argCount))
+            val diagnostic = error(bundle.format("diag.explicit-type-arg-count", declaredCount, argCount))
                 .label(expr, bundle.format("diag.explicit-type-arg-count.help", declaredCount))
+            noteTypeParamSource(diagnostic, symbol.id, declaredCount)
+            labelExtraTypeArgs(diagnostic, explicitArgs, declaredCount)
             // 回退以继续编译：非泛型符号 → 返回原符号类型（占位 scheme 不能用作实际类型）；
             // 泛型函数 → 全推断（fresh 变量）。
             return if (declaredCount == 0) {
@@ -992,6 +1390,16 @@ class TypeInferencer(val context: CompilerContext) {
     }
 
     /**
+     * 若 [calleeExpr] 是已知具名函数，返回其形参声明信息（与形参**下标**一一对应，见 [TypeAnnotations]）；
+     * 不是具名函数、或无任何声明信息时返回 `null`（调用处退化为只用 span 定位、不下推期望类型）。
+     */
+    private fun TypeAnnotationsOf(calleeExpr: Expr): Seq<TypeAnnotation>? {
+        val ident = calleeExpr as? Expr.Identifier ?: return null
+        val defId = ident.defId ?: return null
+        return TypeAnnotations.get(defId)
+    }
+
+    /**
      * 若 [calleeExpr] 是已知具名函数（Identifier 且符号类型为 [Type.Func]），
      * 返回 `函数名位置` 与 `形参声明位置列表`（与形参类型变量一一对应），
      * 供调用处报错的声明方 label 定位。
@@ -1002,7 +1410,7 @@ class TypeInferencer(val context: CompilerContext) {
      * @return null 表示 callee 不是已知具名函数（如 lambda、方法引用），
      *         调用处报错将退化为只有使用方 label、没有声明方 label。
      */
-    private fun paramDeclSpansOf(calleeExpr: Expr): Pair<Span, Seq<Span?>>? {
+    private fun TypeAnnotationSpansOf(calleeExpr: Expr): Pair<Span, Seq<Span?>>? {
         val ident = calleeExpr as? Expr.Identifier ?: return null
         val symbol = ident.defId?.let { symbolTable.get(it) } ?: return null
         val fnType = symbol.type as? Type.Func ?: return null
@@ -1028,8 +1436,33 @@ class TypeInferencer(val context: CompilerContext) {
         return w
     }
 
-    // 当前函数返回上下文：期望返回类型 + 函数声明位置（不匹配报错的声明方 label 用）
-    private data class ReturnContext(val expected: Type, val declSpan: Span)
+    // 当前函数返回上下文：期望返回类型 + 返回类型注解位置（不匹配报错的声明方 label 用）
+    private data class ReturnContext(
+        val expected: Type,
+        val declSpan: Span,
+        /** 返回值注解的类型来源：把声明方 label 收窄到出错子项（如 `Array<Int>` 的 `Int`） */
+        val expectedOrigin: TypeOrigin?,
+        /** 可下推给 `return` 表达式的期望类型（注解含本函数类型参数时为 null） */
+        val push: ExpectedType?,
+    )
+
+    /**
+     * 类型注解的声明信息：注解类型 + 类型来源。
+     *
+     * 形参、`set` 变量、返回值都用它承载「声明方类型」：既用于双向检查下推 [ExpectedType]，
+     * 也用于类型不匹配时的声明方 label。
+     *
+     * @param type 注解类型；无注解时为 [BuiltinType.Unknown]（[isPresent] 为假）
+     * @param origin 类型表达式（`Option<Int>`）的来源树
+     */
+    private class TypeAnnotation(val type: Type, val origin: TypeOrigin?) {
+        val isPresent: Boolean get() = type != BuiltinType.Unknown
+
+        companion object {
+            /** 无注解 */
+            val None = TypeAnnotation(BuiltinType.Unknown, null)
+        }
+    }
 
     /**
      * 泛型函数登记信息：求解完成后基于已求解的 body 重建 TypeScheme。

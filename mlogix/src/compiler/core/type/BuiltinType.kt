@@ -31,17 +31,22 @@ object BuiltinType {
     /**
      * 将给定的 TokenType 转换为对应的 Type。
      *
+     * 注意 `NUM` / `COL` 都必须有类型：一旦返回 [Type.Error]，求解器会静默通过
+     * （见 [mlogix.compiler.passes.typing.TypeSolver]），等于这些字面量在 `Num` 位置上完全不检查。
+     * 颜色值按语言文档「底层上是 `Num`」也归入 [Num]；若将来引入独立的 `Col` 类型，改这里即可。
+     *
      * @return 已知字面量返回对应类型；未知 token 返回 [Type.Error]（绝不抛异常）
      */
     fun toType(tokenType: TokenType): Type {
         return when (tokenType) {
             TokenType.INT -> Int
+            // 浮点字面量（`1.5`、`1e3`）与颜色字面量都属浮点族
+            TokenType.NUM, TokenType.COL -> Num
             TokenType.TRUE, TokenType.FALSE -> Bool
             TokenType.NULL -> Null
             TokenType.STR -> Str
             TokenType.FN -> Fn
             TokenType.UNKNOWN -> Unknown
-            // 颜色等其它字面量暂不映射到具体类型
             else -> Error
         }
     }

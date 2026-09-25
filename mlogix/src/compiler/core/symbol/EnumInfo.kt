@@ -3,6 +3,7 @@ package mlogix.compiler.core.symbol
 import arc.struct.ObjectMap
 import arc.struct.Seq
 import mlogix.compiler.core.span.Span
+import mlogix.compiler.core.type.TypeOrigin
 
 /**
  * 枚举的变体表：`变体名 → 变体 [DefId]`（挂在枚举类型符号的 [Symbol.values] 上）。
@@ -34,14 +35,27 @@ class EnumVariants {
 
 /**
  * 变体载荷信息（挂在变体符号的 [Symbol.values] 上）：
- * 字段数量、字段名（结构体变体用）、字段声明位置（类型不匹配时的声明方 label）。
+ * 字段名（结构体变体用）与每个字段的类型来源（诊断定位用）。
  *
  * @param names 每个载荷字段的名字；元组变体的字段没有名字（空串）
- * @param spans 每个载荷字段的声明位置
+ * @param origins 每个载荷字段的类型来源树（[TypeOrigin]）：
+ *   声明方 label 取它的 `span`，类型不匹配时求解器还会下钻到更精确的子项（如 `Array<Int>` 的 `Int`）
  */
-class VariantPayload(val names: Seq<String>, val spans: Seq<Span>) {
+class VariantPayload(val names: Seq<String>, val origins: Seq<TypeOrigin>) {
     val count: Int get() = names.size
 
     /** 字段名列表文本（如 `width, height`），用于诊断 */
     fun namesText(): String = names.toString(", ")
+
+    /** 第 [index] 个载荷字段的声明位置；越界或缺来源时为 null */
+    fun spanOf(index: Int): Span? {
+        if (index < 0 || index >= origins.size) return null
+        return origins.get(index).span
+    }
+
+    /** 第 [index] 个载荷字段的类型来源；越界时为 null */
+    fun originAt(index: Int): TypeOrigin? {
+        if (index < 0 || index >= origins.size) return null
+        return origins.get(index)
+    }
 }
