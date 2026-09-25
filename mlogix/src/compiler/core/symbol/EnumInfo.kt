@@ -14,20 +14,31 @@ import mlogix.compiler.core.type.TypeOrigin
 class EnumVariants {
     private val variants = ObjectMap<String, DefId>()
 
+    /** 声明顺序的变体名（`ObjectMap` 本身无序，诊断与穷尽性检查都需要稳定顺序） */
+    private val order = Seq<String>(4)
+
     fun contains(name: String): Boolean = variants.containsKey(name)
 
     fun get(name: String): DefId? = variants.get(name)
 
     fun put(name: String, defId: DefId) {
+        if (!variants.containsKey(name)) order.add(name)
         variants.put(name, defId)
+    }
+
+    /** 全部变体名，按声明顺序 */
+    fun names(): Seq<String> {
+        val result = Seq<String>(order.size)
+        result.addAll(order)
+        return result
     }
 
     /** 变体名列表文本（如 `Red, Green`），用于诊断 */
     fun namesText(): String {
         val builder = StringBuilder()
-        variants.forEach { entry: ObjectMap.Entry<String, DefId> ->
+        for (name in order) {
             if (builder.isNotEmpty()) builder.append(", ")
-            builder.append(entry.key)
+            builder.append(name)
         }
         return builder.toString()
     }

@@ -51,6 +51,7 @@ object ASTPrinter {
             is UseItem -> printNode(node, indent, isLast, EXPR_COLOR)
             is MatchBranch -> printNode(node, indent, isLast, EXPR_COLOR)
             is EnumVariant -> printNode(node, indent, isLast, EXPR_COLOR)
+            is Pattern -> printNode(node, indent, isLast, EXPR_COLOR)
             is Token -> printLine(indent, isLast, TOKEN_COLOR + node + Ansi.DEFAULT)
             is Seq<*> -> printList(node, indent, isLast)
             is Array<*> -> printArray(node, indent, isLast)

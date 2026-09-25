@@ -39,7 +39,7 @@ abstract class Stmt(span: Span) : ASTNode(span) {
         Stmt(span)
 
     data class MatchStmt(override val span: Span, val scrutinee: Expr, val branches: Seq<MatchBranch>?) : Stmt(span) {
-        data class MatchBranch(val span: Span, val pattern: Expr, val body: Stmt?) : Spanned {
+        data class MatchBranch(val span: Span, val pattern: Pattern, val body: Stmt?) : Spanned {
             override fun span(): Span {
                 return this.span
             }

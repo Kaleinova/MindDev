@@ -4,6 +4,7 @@ import arc.files.Fi
 import arc.struct.Seq
 import arc.util.I18NBundle.createBundle
 import mlogix.compiler.ast.Expr
+import mlogix.compiler.ast.Pattern
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.CompilerConfig
 import mlogix.compiler.core.SourceFile
@@ -213,11 +214,90 @@ class ParserTest {
 
     @Test
     fun `parse match`() {
-        val ast = parse("match 1 { 1 -> { break } }")
-        val matchBranchBody = Stmt.BlockStmt(span, Seq.with(Stmt.BreakStmt(span, null)))
-        val branch = Stmt.MatchStmt.MatchBranch(span, Expr.Literal(token(TokenType.INT, 1.0)), matchBranchBody)
-        val expectedMatch = Stmt.MatchStmt(span, Expr.Literal(token(TokenType.INT, 1.0)), Seq.with(branch))
-        assertEquals(ast, expectedMatch)
+        // 模式：`枚举名.变体`、带载荷（内含绑定）、`_` 通配符、裸标识符绑定
+        val ast = parse(
+            """
+            match c {
+                Color.Red -> { break }
+                Option.Some(x) -> { }
+                _ -> { }
+                y -> { }
+            }
+            """.trimIndent()
+        )
+
+        val scrutinee = Expr.Identifier(token(TokenType.IDENTIFIER, "c"))
+        val emptyBlock = Stmt.BlockStmt(span, Seq(0))
+        val expected = Stmt.MatchStmt(
+            span,
+            scrutinee,
+            Seq.with(
+                Stmt.MatchStmt.MatchBranch(
+                    span,
+                    Pattern.Variant(
+                        span,
+                        Expr.Get(
+                            Expr.Identifier(token(TokenType.IDENTIFIER, "Color")),
+                            Expr.Identifier(token(TokenType.IDENTIFIER, "Red")),
+                        ),
+                        Seq(0),
+                    ),
+                    Stmt.BlockStmt(span, Seq.with(Stmt.BreakStmt(span, null))),
+                ),
+                Stmt.MatchStmt.MatchBranch(
+                    span,
+                    Pattern.Variant(
+                        span,
+                        Expr.Get(
+                            Expr.Identifier(token(TokenType.IDENTIFIER, "Option")),
+                            Expr.Identifier(token(TokenType.IDENTIFIER, "Some")),
+                        ),
+                        Seq.with(Pattern.Binding(span, Expr.Identifier(token(TokenType.IDENTIFIER, "x")))),
+                    ),
+                    emptyBlock,
+                ),
+                Stmt.MatchStmt.MatchBranch(span, Pattern.Wildcard(span), emptyBlock),
+                Stmt.MatchStmt.MatchBranch(
+                    span,
+                    Pattern.Binding(span, Expr.Identifier(token(TokenType.IDENTIFIER, "y"))),
+                    emptyBlock,
+                ),
+            ),
+        )
+        assertEquals(ast, expected)
+    }
+
+    @Test
+    fun `parse nested variant pattern`() {
+        val ast = parse("match o { Option.Some(Option.None) -> { } }")
+        val expected = Stmt.MatchStmt(
+            span,
+            Expr.Identifier(token(TokenType.IDENTIFIER, "o")),
+            Seq.with(
+                Stmt.MatchStmt.MatchBranch(
+                    span,
+                    Pattern.Variant(
+                        span,
+                        Expr.Get(
+                            Expr.Identifier(token(TokenType.IDENTIFIER, "Option")),
+                            Expr.Identifier(token(TokenType.IDENTIFIER, "Some")),
+                        ),
+                        Seq.with(
+                            Pattern.Variant(
+                                span,
+                                Expr.Get(
+                                    Expr.Identifier(token(TokenType.IDENTIFIER, "Option")),
+                                    Expr.Identifier(token(TokenType.IDENTIFIER, "None")),
+                                ),
+                                Seq(0),
+                            )
+                        ),
+                    ),
+                    Stmt.BlockStmt(span, Seq(0)),
+                )
+            ),
+        )
+        assertEquals(ast, expected)
     }
 
     private fun token(type: TokenType, literal: Any? = null): Token {

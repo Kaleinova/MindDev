@@ -9,6 +9,7 @@ import mlogix.compiler.ast.ASTNode
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Expr.ErrorExpr
 import mlogix.compiler.ast.Expr.Get
+import mlogix.compiler.ast.Pattern
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.ast.Stmt.*
 import mlogix.compiler.core.CompilerContext
@@ -196,7 +197,14 @@ class Parser(
         }
 
         val branches = Seq<MatchStmt.MatchBranch>()
-        while (!match(TokenType.RBRACE)) {
+        while (true) {
+            // 分支之间允许任意换行（`check` 只在「位于换行后的下一个 token 是目标类型」时才跳过换行）
+            while (lookAhead(0).type == TokenType.NEWLINE) next()
+
+            if (check(TokenType.RBRACE)) {
+                next()
+                break
+            }
             if (isAtEnd) {
                 error(bundle.get("diag.miss-match-end"))
                     .label(start, bundle.get("diag.stmt-start"))
@@ -207,14 +215,18 @@ class Parser(
                     branches,
                 )
             }
-            val pattern = expression()
-            if (pattern is ErrorExpr) {
-                recoverByTokenTree(TokenType.RECOVERY)
-                return MatchStmt(
-                    between(start, branches.lastOrNull()?.span ?: scrutinee.span),
-                    scrutinee,
-                    branches,
-                )
+            val pattern = pattern()
+            if (pattern == null) {
+                // 模式解析失败：跳过这一整个分支（`-> 分支体`），后面的分支仍能正常解析，避免级联报错
+                when (recoverByTokenTree(EnumSet.of(TokenType.ARROW, TokenType.NEWLINE, TokenType.RBRACE))) {
+                    TokenType.ARROW -> {
+                        next()
+                        statement()
+                    }
+
+                    else -> Unit
+                }
+                continue
             }
 
             if (consume(TokenType.ARROW) == null) {
@@ -236,6 +248,77 @@ class Parser(
             scrutinee,
             branches,
         )
+    }
+
+    /**
+     * 分支模式：
+     * - `_` 通配符；
+     * - `枚举名.变体` / `枚举名.变体(模式, ...)`（载荷按声明顺序，可嵌套）；
+     * - 裸标识符 → 绑定新变量（Rust 风格：要匹配变体必须写全 `枚举名.变体`）。
+     *
+     * 字面量/元组/范围/or/guard 模式尚未支持，命中时给出明确提示（见 `diag.miss-pattern.help`）。
+     *
+     * @return 解析失败返回 null（已报错并推进）
+     */
+    private fun pattern(): Pattern? {
+        if (!check(TokenType.IDENTIFIER)) {
+            error(bundle.format("diag.miss-pattern", lookAhead(0).type))
+                .label(lookAhead(0), "")
+                .help(bundle.get("diag.miss-pattern.help"))
+            // 保证推进，避免调用方死循环
+            if (!isAtEnd) next()
+            return null
+        }
+
+        val id = next()
+        val name = (id.literal as? String) ?: id.type.toString()
+
+        // `枚举名.变体` / `枚举名.变体(...)`
+        if (check(TokenType.DOT)) {
+            val dot = next()
+            val variant = consume(TokenType.IDENTIFIER) {
+                error(bundle.get("diag.miss-variant-pattern-name"))
+                    .label(dot, bundle.get("diag.variant-pattern-start"))
+                    .label(lookAhead(0), bundle.get("diag.current"))
+            } ?: return null
+            val path = Expr.Get(Expr.Identifier(id), Expr.Identifier(variant))
+            val args = if (check(TokenType.LPAREN)) patternArgs() else Seq(0)
+            return Pattern.Variant(between(id, prevToken), path, args)
+        }
+
+        // `_` 通配符
+        if (name == "_") return Pattern.Wildcard(id.span)
+
+        // 裸标识符 → 绑定
+        return Pattern.Binding(id.span, Expr.Identifier(id))
+    }
+
+    /**
+     * 变体模式的载荷列表，调用前须 `check(TokenType.LPAREN)`。
+     * 分隔符与语言其它列表一致：`,` 或换行可省略（空格亦可）。
+     */
+    private fun patternArgs(): Seq<Pattern> {
+        val lParen = next()
+        val args = Seq<Pattern>(3)
+        while (true) {
+            if (check(TokenType.RPAREN)) {
+                next()
+                return args
+            }
+            if (isAtEnd) {
+                error(bundle.get("diag.miss-pattern-args-end"))
+                    .label(lParen, bundle.get("diag.variant-pattern-start"))
+                    .label(lookAhead(0), bundle.get("diag.current"))
+                return args
+            }
+            val before = lookAhead(0).span.start()
+            val arg = pattern()
+            if (arg != null) args.add(arg)
+            // 分隔符：`,` / 换行 / 空格皆可；若这一轮没有推进，强制推进一格防止死循环
+            match(TokenType.COMMA)
+            matchStmtEnd()
+            if (lookAhead(0).span.start() == before && !check(TokenType.RPAREN)) next()
+        }
     }
 
     private fun forStmt(flag: Expr.Identifier?): Stmt? {

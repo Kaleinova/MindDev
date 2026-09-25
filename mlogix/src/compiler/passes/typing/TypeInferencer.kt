@@ -4,20 +4,21 @@ import arc.struct.IntSet
 import arc.struct.ObjectMap
 import arc.struct.Seq
 import mlogix.compiler.ast.Expr
+import mlogix.compiler.ast.Pattern
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.CompilerContext
 import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
-import mlogix.compiler.core.symbol.DefId
-import mlogix.compiler.core.symbol.Symbol
-import mlogix.compiler.core.symbol.SymbolTable
-import mlogix.compiler.core.symbol.VariantPayload
+import mlogix.compiler.core.symbol.*
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.core.type.*
 import mlogix.compiler.diagnostic.Diagnostic
 import mlogix.compiler.diagnostic.Diagnostic.SemanticDiag
 import mlogix.compiler.ir.ResolutionResult
+import mlogix.compiler.passes.exhaustiveness.ExhaustivenessChecker
+import mlogix.compiler.passes.exhaustiveness.MatchCoverage
+import mlogix.compiler.passes.exhaustiveness.VariantInfo
 import mlogix.util.I18N.bundle
 
 /**
@@ -51,7 +52,7 @@ class TypeInferencer(val context: CompilerContext) {
      * 与 [varDeclSpans] 的区别：后者按类型变量索引登记（只有形参类型恰好是变量时才查得到），
      * 这里按下标登记，泛型函数里 `x: Option<T>` 这类非变量形参也能定位。
      */
-    private val TypeAnnotations = ObjectMap<DefId, Seq<TypeAnnotation>>()
+    private val paramDecls = ObjectMap<DefId, Seq<TypeAnnotation>>()
 
     /** 泛型函数定义 → 它声明的类型参数变量：下推期望类型时要避开（跨调用点共享，下推会互相污染） */
     private val fnTypeParamVars = ObjectMap<DefId, Seq<Type.Var>>()
@@ -61,6 +62,12 @@ class TypeInferencer(val context: CompilerContext) {
      * 供「显式类型实参数量不匹配」的 note 说明数量从哪来（`enum Option<T>` / `fn id<T>`）。
      */
     private val declaredTypeParamNames = ObjectMap<DefId, Seq<String>>()
+
+    /** 枚举名 → 枚举符号（同文件）：穷尽性检查要按被匹配类型的名字反查变体表 */
+    private val enumSymbols = ObjectMap<String, Symbol>()
+
+    /** 本次 walk 收集到的 match 覆盖性检查输入（求解后统一检查） */
+    private val matchCoverages = Seq<MatchCoverage>(4)
 
     /** 泛型函数登记表：walk 阶段登记，求解完成后统一重建 TypeScheme（见 [analyze] 末尾） */
     private val genericFns = Seq<GenericFnInfo>(4)
@@ -84,15 +91,23 @@ class TypeInferencer(val context: CompilerContext) {
         constraints.clear()
         genericFns.clear()
         typeParamStack.clear()
-        TypeAnnotations.clear()
+        paramDecls.clear()
         fnTypeParamVars.clear()
         declaredTypeParamNames.clear()
+        enumSymbols.clear()
+        matchCoverages.clear()
 
         // walk AST and collect constraints
         analyzeStmt(result.ast)
 
         // solve collected constraints
         solver.solveEqualities(constraints)
+
+        // 穷尽性/冗余检查：需要**求解后**的被匹配值类型，故放在求解之后。
+        // 检查逻辑独立在 [ExhaustivenessChecker]（可用 variantsOf 单独喂数据测试）；
+        // TODO: 等表达式类型落到 typed IR，移交 PassId.EXHAUSTIVENESS 的独立 pass。
+        val checker = ExhaustivenessChecker(context)
+        for (coverage in matchCoverages) checker.check(coverage)
 
         // 泛型函数：求解完成后，基于"已求解的 body"重新泛化。
         // 为什么需要这步：类型方案在 walk 阶段（函数体分析前）暂挂，此时求解器尚未合并任何约束；
@@ -186,6 +201,83 @@ class TypeInferencer(val context: CompilerContext) {
         }
     }
 
+    // ========== 模式（match 分支） ==========
+
+    /**
+     * 模式与被匹配类型的一致性检查（双向检查的「模式侧」）：
+     * - `_`：什么都不绑定；
+     * - 绑定：把被匹配类型直接写进新符号（绑定必然匹配，不产生约束）；
+     * - 变体模式：变体所属枚举必须等于被匹配类型（`match 1 { Option.None -> }` 在此报错），
+     *   载荷数量必须相符，载荷模式递归检查（声明方 label 用载荷字段的位置与来源）。
+     */
+    private fun checkPattern(pattern: Pattern, expected: ExpectedType, declSpan: Span?) {
+        when (pattern) {
+            is Pattern.Wildcard -> Unit
+
+            is Pattern.Binding -> {
+                pattern.name.defId?.let { defId ->
+                    symbolTable.get(defId)?.let { symbol -> symbol.type = expected.type }
+                }
+            }
+
+            is Pattern.Variant -> {
+                val variant = (pattern.path.field as? Expr.Identifier)?.defId?.let { symbolTable.get(it) }
+                if (variant == null || variant.values.get(Symbol.ENUM_VARIANT_KEY) != true) {
+                    // Resolver 已报错（没有这个变体 / 枚举名写错）：静默跳过，避免级联
+                    return
+                }
+                val constructor = instantiateVariant(variant, pattern.path, null)
+                val payloadTypes = (constructor as? Type.Func)?.params ?: Seq<Type>(0)
+                val enumType = (constructor as? Type.Func)?.result ?: constructor
+                constraints.add(
+                    Constraint.Equal(enumType, expected.type, pattern.path.span, declSpan, null, expected.origin)
+                )
+
+                val payload = variant.values.get(Symbol.VARIANT_PAYLOAD_KEY) as? VariantPayload
+                if (payloadTypes.size != pattern.args.size) {
+                    error(
+                        bundle.format("diag.pattern-payload-count", variant.name, payloadTypes.size, pattern.args.size)
+                    ).label(
+                        pattern,
+                        bundle.format("diag.pattern-payload-count.help", variant.name, payload?.namesText() ?: ""),
+                    )
+                }
+                for ((i, arg) in pattern.args.withIndex()) {
+                    if (i < payloadTypes.size) {
+                        checkPattern(arg, ExpectedType(payloadTypes.get(i), payload?.originAt(i)), payload?.spanOf(i))
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 某个类型的构造器集合（枚举变体 + 已按类型实参代入的载荷类型）；不是已知枚举时返回 null。
+     *
+     * 穷尽性检查据此判定：非枚举类型（整数/字符串/未求解变量）构造器未知 → 不做穷尽判定。
+     */
+    private fun variantsOf(type: Type): Seq<VariantInfo>? {
+        val solved = solver.read(type)
+        val con = when (solved) {
+            is Type.App -> solved.con
+            is Type.Con -> solved
+            else -> return null
+        }
+        val enumSymbol = enumSymbols.get(con.name) ?: return null
+        val variants = enumSymbol.values.get(Symbol.ENUM_VARIANTS_KEY) as? EnumVariants ?: return null
+        val args = (solved as? Type.App)?.args ?: Seq<Type>(0)
+
+        val names = variants.names()
+        val infos = Seq<VariantInfo>(names.size)
+        for (name in names) {
+            val variantSymbol = variants.get(name)?.let { symbolTable.get(it) } ?: continue
+            val constructor = variantSymbol.typeScheme.instantiateWith(args) { solver.freshVar() }
+            val payloadTypes = (constructor as? Type.Func)?.params ?: Seq<Type>(0)
+            infos.add(VariantInfo(name, payloadTypes))
+        }
+        return infos
+    }
+
     private fun analyzeStmt(stmt: Stmt?) {
         if (stmt == null) return
         when (stmt) {
@@ -218,10 +310,27 @@ class TypeInferencer(val context: CompilerContext) {
             is Stmt.MatchStmt -> {
                 val scrutinee = inferExpr(stmt.scrutinee)
                 constraints.addAll(scrutinee.constraints)
-                stmt.branches?.let { brs ->
-                    for ((_, _, body) in brs) {
+
+                stmt.branches?.let { branches ->
+                    val arms = Seq<Pattern>(branches.size)
+                    val expected = ExpectedType(scrutinee.type, scrutinee.origin)
+                    for ((_, pattern, body) in branches) {
+                        checkPattern(pattern, expected, stmt.scrutinee.span)
+                        arms.add(pattern)
                         analyzeStmt(body)
                     }
+                    // 穷尽性/冗余检查需要**求解后**的被匹配类型，故登记待求解后统一检查
+                    // （TODO: 表达式类型落到 typed IR 之后，移交 PassId.EXHAUSTIVENESS 独立 pass）
+                    matchCoverages.add(
+                        MatchCoverage(
+                            stmt.span,
+                            stmt.scrutinee.span,
+                            scrutinee.type,
+                            arms,
+                            ::variantsOf,
+                            { type -> solver.read(type) },
+                        )
+                    )
                 }
             }
 
@@ -364,12 +473,12 @@ class TypeInferencer(val context: CompilerContext) {
 
         // 形参类型（形参声明信息与下标一一对应：注解类型 + 来源，供期望类型下推与声明方 label）
         val paramTypes = Seq<Type>(8)
-        val TypeAnnotationInfo = Seq<TypeAnnotation>(stmt.params?.size ?: 0)
+        val paramDeclInfo = Seq<TypeAnnotation>(stmt.params?.size ?: 0)
         stmt.params?.let { params ->
             for (p in params) {
                 if (p is Expr.Annotation) {
                     val declType = annotationToType(p)
-                    TypeAnnotationInfo.add(TypeAnnotation(declType, annotationToOrigin(p)))
+                    paramDeclInfo.add(TypeAnnotation(declType, annotationToOrigin(p)))
                     if (isGeneric) {
                         // 泛型函数：注解类型直接作为形参类型（`x: T` → T 的变量）
                         paramTypes.add(declType)
@@ -387,12 +496,12 @@ class TypeInferencer(val context: CompilerContext) {
                 } else {
                     // 无注解：fresh 变量（泛型函数中它会并入暂挂 scheme 的 typeVars）
                     paramTypes.add(solver.freshVar())
-                    TypeAnnotationInfo.add(TypeAnnotation.None)
+                    paramDeclInfo.add(TypeAnnotation.None)
                 }
             }
         }
         // 形参声明按下标登记（不像 varDeclSpans 那样按类型变量索引：泛型函数的形参类型可能不是变量）
-        if (!TypeAnnotationInfo.isEmpty) TypeAnnotations.put(fnSymbol.id, TypeAnnotationInfo)
+        if (!paramDeclInfo.isEmpty) paramDecls.put(fnSymbol.id, paramDeclInfo)
         if (isGeneric) fnTypeParamVars.put(fnSymbol.id, typeParamVars)
 
         // 返回值类型：无注解 → fresh 变量；单一返回值有注解 → 注解类型（泛型）或 Equal 约束（非泛型）。
@@ -500,6 +609,8 @@ class TypeInferencer(val context: CompilerContext) {
             enumType = Type.App(Type.Con(enumSymbol.name), args)
         }
         enumSymbol.type = enumType
+        // 登记枚举名 → 符号：穷尽性检查按被匹配类型的名字反查变体表
+        enumSymbols.put(enumSymbol.name, enumSymbol)
 
         for (variant in stmt.variants) {
             val variantSymbol = variant.name.defId?.let { symbolTable.get(it) } ?: continue
@@ -1052,8 +1163,8 @@ class TypeInferencer(val context: CompilerContext) {
                 // 类型实参挂在 callee 的 Identifier 上（`foo<Int>(...)`），由 inferExpr(Identifier)
 
                 // 若 callee 是已知具名函数：取形参声明位置与声明信息（后者用于期望类型下推）
-                val calleeInfo = TypeAnnotationSpansOf(expr.callee)
-                val calleeDecls = TypeAnnotationsOf(expr.callee)
+                val calleeInfo = paramDeclSpansOf(expr.callee)
+                val calleeDecls = paramDeclsOf(expr.callee)
                 val calleeDefId = (expr.callee as? Expr.Identifier)?.defId
 
                 // 实参：逐个推断；注解类型已知时把「期望类型」下推，错误就地报在实参子表达式上
@@ -1077,14 +1188,14 @@ class TypeInferencer(val context: CompilerContext) {
                 // 2) 逐实参约束：使用方=实参自身 span（label），声明方=形参注解位置（label）。
                 //    这样每个不匹配的实参单独报错，而不是整个 Call 一个错误。
                 //    实参已消费期望类型时跳过（那次比较在实参内部已完成，避免重复报错）。
-                val TypeAnnotationSpans = calleeInfo?.second
-                val declSpanCount = TypeAnnotationSpans?.size ?: 0
+                val paramDeclSpans = calleeInfo?.second
+                val declSpanCount = paramDeclSpans?.size ?: 0
                 val declCount = calleeDecls?.size ?: 0
                 for ((i, ar) in argResults.withIndex()) {
                     if (ar.expectedHandled) continue
                     // 实参数量可能超过形参声明数量（结构链接约束会另行报「参数数量不匹配」），
                     // 越界的实参没有对应形参声明位置 → declSpan 取 null（退化为仅使用方 label）。
-                    val declSpan = if (i < declSpanCount) TypeAnnotationSpans?.get(i) else null
+                    val declSpan = if (i < declSpanCount) paramDeclSpans?.get(i) else null
                     val declOrigin = if (i < declCount) calleeDecls?.get(i)?.origin else null
                     combined.add(
                         Constraint.Equal(
@@ -1411,13 +1522,13 @@ class TypeInferencer(val context: CompilerContext) {
     }
 
     /**
-     * 若 [calleeExpr] 是已知具名函数，返回其形参声明信息（与形参**下标**一一对应，见 [TypeAnnotations]）；
+     * 若 [calleeExpr] 是已知具名函数，返回其形参声明信息（与形参**下标**一一对应，见 [paramDecls]）；
      * 不是具名函数、或无任何声明信息时返回 `null`（调用处退化为只用 span 定位、不下推期望类型）。
      */
-    private fun TypeAnnotationsOf(calleeExpr: Expr): Seq<TypeAnnotation>? {
+    private fun paramDeclsOf(calleeExpr: Expr): Seq<TypeAnnotation>? {
         val ident = calleeExpr as? Expr.Identifier ?: return null
         val defId = ident.defId ?: return null
-        return TypeAnnotations.get(defId)
+        return paramDecls.get(defId)
     }
 
     /**
@@ -1431,7 +1542,7 @@ class TypeInferencer(val context: CompilerContext) {
      * @return null 表示 callee 不是已知具名函数（如 lambda、方法引用），
      *         调用处报错将退化为只有使用方 label、没有声明方 label。
      */
-    private fun TypeAnnotationSpansOf(calleeExpr: Expr): Pair<Span, Seq<Span?>>? {
+    private fun paramDeclSpansOf(calleeExpr: Expr): Pair<Span, Seq<Span?>>? {
         val ident = calleeExpr as? Expr.Identifier ?: return null
         val symbol = ident.defId?.let { symbolTable.get(it) } ?: return null
         val fnType = symbol.type as? Type.Func ?: return null

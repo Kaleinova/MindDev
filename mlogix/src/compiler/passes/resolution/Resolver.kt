@@ -2,6 +2,7 @@ package mlogix.compiler.passes.resolution
 
 import arc.struct.Seq
 import mlogix.compiler.ast.Expr
+import mlogix.compiler.ast.Pattern
 import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.CompilerContext
 import mlogix.compiler.core.SourceFile
@@ -90,8 +91,10 @@ class Resolver(private val context: CompilerContext) {
                 resolveExpr(stmt.scrutinee, scope)
                 stmt.branches?.let { branches ->
                     for (branch in branches) {
-                        resolveExpr(branch.pattern, scope)
-                        resolveStmt(branch.body, scope)
+                        // 每个分支独立作用域：模式里的绑定只在该分支（模式 + 分支体）内可见
+                        val armScope = scope.child()
+                        resolvePattern(branch.pattern, armScope)
+                        resolveStmt(branch.body, armScope)
                     }
                 }
             }
@@ -305,6 +308,42 @@ class Resolver(private val context: CompilerContext) {
                     // （结构体变体缺少 `: 类型` 时 Parser 已报错，不再当类型名解析以免级联报错）
                     resolveAnnotationNames(field, variantScope)
                 }
+            }
+        }
+    }
+
+    // ========== 模式解析 ==========
+    /**
+     * match 分支模式解析：
+     * - `_`：不绑定任何名字；
+     * - 裸标识符：在**当前分支作用域**声明新符号（绑定，Rust 风格；同名遮蔽外层名字是允许的）；
+     * - `枚举名.变体(...)`：复用表达式的变体访问解析（同一张变体表、同一个「没有这个变体」诊断），
+     *   载荷模式递归解析（嵌套绑定同样落在当前分支作用域）。
+     */
+    private fun resolvePattern(pattern: Pattern, scope: Scope) {
+        when (pattern) {
+            is Pattern.Wildcard -> Unit
+
+            is Pattern.Binding -> {
+                val name = (pattern.name.token.literal as? String) ?: pattern.name.token.type.toString()
+                val symbol = declare(name, BuiltinType.Unknown, pattern.name.span, scope)
+                pattern.name.defId = symbol?.id
+            }
+
+            is Pattern.Variant -> {
+                val enumSymbol = enumTypeSymbolOf(pattern.path.obj, scope)
+                if (enumSymbol != null) {
+                    resolveEnumVariantAccess(pattern.path, enumSymbol, scope)
+                } else {
+                    // 不是枚举类型：先按普通表达式解析（能报出「未声明的标识符」），再补「不是枚举」诊断
+                    resolveExpr(pattern.path.obj, scope)
+                    val objSymbol = (pattern.path.obj as? Expr.Identifier)?.defId?.let { symbolTable.get(it) }
+                    if (objSymbol != null && objSymbol.values.get(Symbol.ENUM_KEY) != true) {
+                        error(bundle.format("diag.pattern-not-enum", objSymbol.name))
+                            .label(pattern.path.obj, bundle.get("diag.pattern-not-enum.help"))
+                    }
+                }
+                for (arg in pattern.args) resolvePattern(arg, scope)
             }
         }
     }
