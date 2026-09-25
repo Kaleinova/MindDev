@@ -101,9 +101,11 @@ class DiagnosticSpanTest {
         )
         assertEquals(1, context.diagHandler.errorNum())
         val error = context.diagHandler.errors[0]
-        // 主 label 圈类型表达式；具体是哪个实参多余由 help 的删除标记指出
-        assertEquals(1, error.labels.size)
+        // 主 label 圈类型表达式；次级 label 指出具体哪个实参多余（与主 label 重叠，由渲染器分行画出）
+        assertEquals(2, error.labels.size)
         assertEquals("Option<Int, Str>", textOf(source, error.labels[0].span))
+        assertEquals("Str", textOf(source, error.labels[1].span), "只有 `Str` 是多余的")
+        assertEquals(I18N.bundle.get("diag.explicit-type-arg-count.extra"), error.labels[1].text)
 
         // help 是可直接照着改的删除建议：`Str` 被标成 `-`
         val help = error.suggestions[1] as Diagnostic.Help
@@ -371,6 +373,32 @@ class DiagnosticSpanTest {
         )
         assertEquals(1, context.diagHandler.errorNum())
         assertEquals("\"s\"", textOf(source, context.diagHandler.errors[0].labels[0].span))
+    }
+
+    // ========== 注解位置的类型实参数量 ==========
+
+    @Test
+    fun `enum type argument count in annotation also labels the extra argument`() {
+        // 注解位置（`x: Option<Int, Str>`）与 turbofish 位置（`Option<Int, Str>.Some`）是同一类错误
+        val source = analyze(
+            """
+            enum Option<T> {
+                None
+            }
+            fn f(x: Option<Int, Str>) -> r : Int { return 0 }
+            """.trimIndent()
+        )
+        assertEquals(1, context.diagHandler.errorNum())
+        val error = context.diagHandler.errors[0]
+        assertEquals("Option<Int, Str>", textOf(source, error.labels[0].span), "主 label 圈类型表达式")
+        assertEquals("Str", textOf(source, error.labels[1].span), "次级 label 指出多余的实参")
+        assertEquals(I18N.bundle.get("diag.explicit-type-arg-count.extra"), error.labels[1].text)
+
+        // note 指向声明处；help 是可应用的删除建议
+        val note = error.suggestions[0] as Diagnostic.Note
+        assertEquals("Option", textOf(source, note.labels[0].span))
+        val help = error.suggestions[1] as Diagnostic.Help
+        assertEquals("Str", textOf(source, help.labels[0].span))
     }
 
     // ========== 退化路径 ==========

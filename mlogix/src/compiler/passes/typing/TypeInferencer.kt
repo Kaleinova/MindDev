@@ -709,9 +709,10 @@ class TypeInferencer(val context: CompilerContext) {
      * （对应 rustc E0107 的 `help: remove this generic argument`）：
      * 一条 `help` 带若干删除 label，渲染成可照着改的 `-` 标记。
      *
-     * 不额外挂"多余实参"次级 label：它必然落在主 label（整个类型表达式）区间内，
-     * 而渲染器会丢弃同一行重叠的 label（见 [mlogix.compiler.diagnostic.Diagnostic.renderLine]），
-     * 徒增噪音；指向具体实参的职责由 help 的删除标记承担。
+     * 多余实参（下标 ≥ 声明数量）各挂一个次级 label，直接指出哪个实参是多余的；
+     * 它必然与主 label（整个类型表达式）重叠，由渲染器分行渲染（见
+     * [mlogix.compiler.diagnostic.Diagnostic.renderLine]）；另有一条 `help` 带删除 label，
+     * 渲染成可照着改的 `-` 标记（机器可应用的修复）。
      *
      * 实参不足时**不**给代码建议：本语言没有 `_` 类型占位符，插入任何写法都会引入新错误，
      * 只在主 label 的文案里提示「传恰好 N 个，或不传以全部推断」。
@@ -728,6 +729,9 @@ class TypeInferencer(val context: CompilerContext) {
         }
         if (extras.isEmpty) return
 
+        for (extra in extras) {
+            diagnostic.label(extra, bundle.get("diag.explicit-type-arg-count.extra"))
+        }
         val help = diagnostic.help(bundle.format("diag.explicit-type-arg-count.remove-extra", extras.size))
         for (extra in extras) help.delete(extra)
     }
@@ -1251,26 +1255,31 @@ class TypeInferencer(val context: CompilerContext) {
             val argTypes = Seq<Type>(nestedArgs.size)
             for (a in nestedArgs) argTypes.add(typeArgToType(a))
             if (symbol?.values?.get(Symbol.ENUM_KEY) == true) {
-                return enumAppType(symbol, argTypes, expr)
+                return enumAppType(symbol, argTypes, nestedArgs, expr)
             }
             return if (symbol?.type == BuiltinType.Array) {
                 if (nestedArgs.size != 1) {
-                    error(bundle.format("diag.type-arg-count", BuiltinType.Array.name, 1, nestedArgs.size))
-                        .label(expr, "")
+                    val diagnostic = error(
+                        bundle.format("diag.type-arg-count", BuiltinType.Array.name, 1, nestedArgs.size)
+                    ).label(expr, bundle.format("diag.explicit-type-arg-count.help", 1))
+                    // `Array` 是内置类型，没有声明处可指；只标出多余的类型实参
+                    labelExtraTypeArgs(diagnostic, nestedArgs, 1)
                     Type.Error
                 } else {
                     Type.App(BuiltinType.Array, argTypes)
                 }
             } else {
-                error(bundle.format("diag.type-not-generic", symbol?.name ?: expr.token.literal))
+                val diagnostic = error(bundle.format("diag.type-not-generic", symbol?.name ?: expr.token.literal))
                     .label(expr, "")
+                // 不接受任何类型实参：凡写了的都是多余的
+                labelExtraTypeArgs(diagnostic, nestedArgs, 0)
                 Type.Error
             }
         }
         // 裸标识符
         if (symbol?.values?.get(Symbol.ENUM_KEY) == true) {
             // 裸写 `Option`：类型实参全部待推断（与裸 `Array` 的宽松处理一致）
-            return enumAppType(symbol, Seq<Type>(0), expr)
+            return enumAppType(symbol, Seq<Type>(0), null, expr)
         }
         return when {
             symbol == null -> Type.Error
@@ -1289,12 +1298,22 @@ class TypeInferencer(val context: CompilerContext) {
      * - 非泛型枚举 `Color`：`Type.Con("Color")`；写类型实参（`Color<Int>`）报「不接受类型实参」；
      * - 泛型枚举 `Option<T>`：实参数量必须等于声明的类型参数数量（否则 [diag.type-arg-count]）；
      *   [argTypes] 为空（裸写 `Option`）时按「全部待推断」补 fresh 变量。
+     *
+     * 两个错误都按 rustc E0107 的口径补全诊断：主 label 带修复提示、多余实参逐个标出并给可应用的
+     * 删除建议、note 指向枚举声明处（[writtenArgs] 为写出来的类型实参 AST，供定位使用）。
      */
-    private fun enumAppType(symbol: Symbol, argTypes: Seq<Type>, at: Expr): Type {
+    private fun enumAppType(
+        symbol: Symbol,
+        argTypes: Seq<Type>,
+        writtenArgs: Seq<Expr.Identifier>?,
+        at: Expr,
+    ): Type {
         val declaredCount = symbol.values.get(Symbol.ENUM_TYPE_PARAM_COUNT_KEY) as? Int ?: 0
         if (declaredCount == 0) {
             if (!argTypes.isEmpty) {
-                error(bundle.format("diag.type-not-generic", symbol.name)).label(at, "")
+                val diagnostic = error(bundle.format("diag.type-not-generic", symbol.name)).label(at, "")
+                // 不接受任何类型实参：凡写了的都是多余的
+                labelExtraTypeArgs(diagnostic, writtenArgs, 0)
                 return Type.Error
             }
             return Type.Con(symbol.name)
@@ -1305,8 +1324,10 @@ class TypeInferencer(val context: CompilerContext) {
             return Type.App(Type.Con(symbol.name), args)
         }
         if (argTypes.size != declaredCount) {
-            error(bundle.format("diag.type-arg-count", symbol.name, declaredCount, argTypes.size))
-                .label(at, "")
+            val diagnostic = error(bundle.format("diag.type-arg-count", symbol.name, declaredCount, argTypes.size))
+                .label(at, bundle.format("diag.explicit-type-arg-count.help", declaredCount))
+            noteTypeParamSource(diagnostic, symbol.id, declaredCount)
+            labelExtraTypeArgs(diagnostic, writtenArgs, declaredCount)
             return Type.Error
         }
         return Type.App(Type.Con(symbol.name), argTypes)

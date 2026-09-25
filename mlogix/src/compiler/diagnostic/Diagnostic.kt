@@ -209,6 +209,14 @@ abstract class Diagnostic(
         }
     }
 
+    /**
+     * 渲染一行源码上的全部标注。
+     *
+     * 同一行上**重叠/嵌套**的 label（例如主 label 圈住整个类型表达式 `Option<Int, Str>`，
+     * 次级 label 只圈其中一个实参 `Str`）会按「标注行」打包：放不进当前标注行的 label
+     * 进入下一标注行，**绝不丢弃**（rustc 同样把重叠标注分行渲染）。
+     * 同一标注行内保证各 label 从左到右互不重叠，因此可以直接顺序绘制标记。
+     */
     private fun renderLine(file: SourceFile, line: Int, originalLabels: Seq<Label>, maxLineStrLen: Int): String {
         val lineNumStr = (line + 1).toString()
 
@@ -220,57 +228,100 @@ abstract class Diagnostic(
                 }\n"
             )
 
-            // 备餐
-            val labels = Seq<Label>(originalLabels.size)
+            // 准备数据：每个 label 的起始列与标记长度
+            val cols = IntSeq(originalLabels.size)
             val lens = IntSeq(originalLabels.size)
-            val spaces = IntSeq(originalLabels.size)
-            var curCol = 0
             for (label in originalLabels) {
-                val col = file.getDisplayCol(label.span.start())
-                val len = markLen(file, label.span)
-                val space = col - curCol
-                if (space < 0) continue
-                labels.add(label)
-                lens.add(len)
-                spaces.add(space)
-                curCol = col + len
+                cols.add(file.getDisplayCol(label.span.start()))
+                lens.add(markLen(file, label.span))
             }
 
-            // ┃  ^ - ^ labels[size-1]text
-            append(renderBlank(maxLineStrLen))
-            for ((i, label) in labels.withIndex()) {
-                append(" ".repeat(spaces[i]))
-                append(label.style.marker.toString().repeat(lens[i]))
+            // 逐标注行渲染（大多数情况下只有一个标注行，与旧输出一致）
+            for (row in packLabelRows(originalLabels, cols, lens)) {
+                renderLabelRow(originalLabels, row, cols, lens, maxLineStrLen)
             }
-            append(" ${labels.last().text}\n")
+        }
+    }
+
+    /**
+     * 把一行上的 label 打包成若干「标注行」：按给定顺序（调用方已按列排序）贪心放入第一个
+     * 放得下的标注行，与同行已有 label 重叠时就新开一行。
+     *
+     * @return 每个标注行内的 label 下标（相对 [labels]）
+     */
+    private fun packLabelRows(labels: Seq<Label>, cols: IntSeq, lens: IntSeq): Seq<IntSeq> {
+        val rows = Seq<IntSeq>(2)
+        val rowEnds = IntSeq(2)
+        for (i in 0 until labels.size) {
+            val col = cols[i]
+            var placed = false
+            for (r in 0 until rows.size) {
+                if (col < rowEnds[r]) continue
+                rows[r].add(i)
+                rowEnds[r] = col + lens[i]
+                placed = true
+                break
+            }
+            if (!placed) {
+                val row = IntSeq(2)
+                row.add(i)
+                rows.add(row)
+                rowEnds.add(col + lens[i])
+            }
+        }
+        return rows
+    }
+
+    /**
+     * 渲染一个标注行：先画该行各 label 的标记，再补文本——
+     * 行内最后一个 label 的文本跟在标记行之后，其余文本用竖线连接依次向下（既有样式）。
+     */
+    private fun StringBuilder.renderLabelRow(
+        labels: Seq<Label>,
+        row: IntSeq,
+        cols: IntSeq,
+        lens: IntSeq,
+        maxLineStrLen: Int,
+    ) {
+        // ┃  ^ - ^ labels[last]text
+        val spaces = IntSeq(row.size)
+        var curCol = 0
+        append(renderBlank(maxLineStrLen))
+        for (k in 0 until row.size) {
+            val index = row[k]
+            val space = cols[index] - curCol
+            spaces.add(space)
+            append(" ".repeat(space))
+            append(labels[index].style.marker.toString().repeat(lens[index]))
+            curCol = cols[index] + lens[index]
+        }
+        append(" ${labels[row[row.size - 1]].text}\n")
+
+        // ┃  | |
+        // ┃  | labels[k-1].text
+        // ┃  |
+        // ┃  labels[0].text
+        for (k in row.size - 2 downTo 0) {
+            val text = labels[row[k]].text
+            if (text.isEmpty()) continue
 
             // ┃  | |
-            // ┃  | labels[size-2].text
-            // ┃  |
-            // ┃  labels[size-3].text
-            for (i in labels.size - 2 downTo 0) {
-                val text = labels[i].text
-                if (text.isEmpty()) continue
-
-                // ┃  | |
-                append(renderBlank(maxLineStrLen))
-                for (j in 0..i) {
-                    append(" ".repeat(spaces[j]))
-                    append("|")
-                }
-                append("\n")
-
-                // ┃ | labels[size-2].text
-                append(renderBlank(maxLineStrLen))
-                for (j in 0..i - 1) {
-                    append(" ".repeat(spaces[j]))
-                    append("|")
-                }
-                append(" ".repeat(spaces[i]))
-                append(text)
-                append("\n")
+            append(renderBlank(maxLineStrLen))
+            for (j in 0..k) {
+                append(" ".repeat(spaces[j]))
+                append("|")
             }
+            append("\n")
 
+            // ┃ | labels[k].text
+            append(renderBlank(maxLineStrLen))
+            for (j in 0..k - 1) {
+                append(" ".repeat(spaces[j]))
+                append("|")
+            }
+            append(" ".repeat(spaces[k]))
+            append(text)
+            append("\n")
         }
     }
 
