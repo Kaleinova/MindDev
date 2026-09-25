@@ -24,7 +24,7 @@ object Main {
 
         if (args.size >= 2) {
             when (args[1]) {
-                "d" -> Log.setLevel(Log.LogType.DEBUG)
+                "d" -> Log.level = Log.LogType.DEBUG
             }
         }
 
