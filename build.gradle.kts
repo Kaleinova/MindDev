@@ -9,7 +9,6 @@ buildscript {
 }
 
 val mindustryVersion = project.property("mindustryVersion") as String
-val kotlinVersion = project.property("kotlinVersion") as String
 val sdkRoot: String? = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
 val isWindows = System.getProperty("os.name").lowercase().contains("windows")
 val modArtifactName = project.name
