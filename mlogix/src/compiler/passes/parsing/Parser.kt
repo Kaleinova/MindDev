@@ -1101,7 +1101,9 @@ class Parser(
                         .label(prevToken.span.cutLast(result.remaining))
                 }
                 if (result.args.size != 0) {
-                    return Expr.Identifier(id, result.args)
+                    // 带类型实参的标识符：span 要覆盖到 `>`（即 `Option<Int>` 整体），
+                    // 否则内层类型实参（`Int`）会落在注解 span 之外，诊断便无法收窄到它
+                    return Expr.Identifier(withSpanOf(id, prevToken, result.remaining), result.args)
                 }
             }
             return Expr.Identifier(id)
@@ -1155,7 +1157,9 @@ class Parser(
                         if (subArgs.args.size == 0) {
                             args.add(Expr.Identifier(id))
                         } else {
-                            args.add(Expr.Identifier(id, subArgs.args))
+                            // 与 identifier() 同理：span 覆盖到 `>`（`Option<Int>` 整体），
+                            // 多消耗的 `>`（`>>` 拆分）要切掉
+                            args.add(Expr.Identifier(withSpanOf(id, prevToken, subArgs.remaining), subArgs.args))
                         }
                         remaining += subArgs.remaining
                         match(TokenType.COMMA)
@@ -1661,6 +1665,19 @@ class Parser(
     // ---------- 类生成方法 ----------
     private fun token(type: TokenType, from: Token): Token {
         return Token(from.span, type)
+    }
+
+    /**
+     * 复制 [from] 的类型与字面量，但 span 改为 `[from] 起点 .. [to] 终点 - dropTail`。
+     *
+     * 用于把「标识符 + 类型实参」（`Option<Int>`）合成一个整体的位置：
+     * 嵌套泛型解析为了处理 `>>` 会一次消耗两个 `>`，多出来的部分用 [dropTail] 切掉。
+     */
+    private fun withSpanOf(from: Token, to: Token, dropTail: Int = 0): Token {
+        val start = from.span.start()
+        val end = to.span.end() - dropTail
+        if (end <= start) return from
+        return Token(Span.between(sourceFile.index, start, end), from.type, from.literal)
     }
 
     /**
