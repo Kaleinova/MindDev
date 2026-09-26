@@ -1,6 +1,7 @@
 package mlogix.compiler.ir
 
 import mlogix.compiler.ast.Stmt
+import mlogix.compiler.core.symbol.DefId
 import mlogix.compiler.core.symbol.Scope
 import mlogix.compiler.core.symbol.SymbolTable
 

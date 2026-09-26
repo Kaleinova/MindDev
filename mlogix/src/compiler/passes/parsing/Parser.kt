@@ -281,7 +281,7 @@ class Parser(
                     .label(dot, bundle.get("diag.variant-pattern-start"))
                     .label(lookAhead(0), bundle.get("diag.current"))
             } ?: return null
-            val path = Expr.Get(Expr.Identifier(id), Expr.Identifier(variant))
+            val path = Get(Expr.Identifier(id), Expr.Identifier(variant))
             val args = if (check(TokenType.LPAREN)) patternArgs() else Seq(0)
             return Pattern.Variant(between(id, prevToken), path, args)
         }
