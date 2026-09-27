@@ -150,7 +150,7 @@ class GenericSemanticsTest {
 
     @Test
     fun `variable type propagates through set chain`() {
-        // `set b = a` 必须能看到 a 已推断为 Int（回归：SetVarStmt 曾因去重推断而丢失快速传播）
+        // `set b = a` 必须能看到 a 已推断为 Int（回归：SetVar 曾因去重推断而丢失快速传播）
         assertEquals(
             1,
             analyze(

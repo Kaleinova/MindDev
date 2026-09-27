@@ -1,9 +1,9 @@
 package mlogix.compiler.ast
 
 import arc.struct.Seq
-import mlogix.compiler.ast.Stmt.EnumStmt.EnumVariant
-import mlogix.compiler.ast.Stmt.MatchStmt.MatchBranch
-import mlogix.compiler.ast.Stmt.UseStmt.UseItem
+import mlogix.compiler.ast.Stmt.Enum.EnumVariant
+import mlogix.compiler.ast.Stmt.Match.MatchBranch
+import mlogix.compiler.ast.Stmt.Use.UseItem
 import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.span.Spanned

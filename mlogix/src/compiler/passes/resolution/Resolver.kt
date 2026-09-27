@@ -68,11 +68,11 @@ class Resolver(private val context: CompilerContext) {
                 for (s in stmt.stmts) resolveStmt(s, scope)
             }
 
-            is Stmt.UseStmt -> {
+            is Stmt.Use -> {
                 // use / import 暂不处理
             }
 
-            is Stmt.BlockStmt -> {
+            is Stmt.Block -> {
                 val child = scope.child()
                 for (s in stmt.stmts) resolveStmt(s, child)
             }
@@ -81,13 +81,13 @@ class Resolver(private val context: CompilerContext) {
                 resolveExpr(stmt.expr, scope)
             }
 
-            is Stmt.IfStmt -> {
+            is Stmt.If -> {
                 resolveExpr(stmt.condition, scope)
                 resolveStmt(stmt.thenBranch, scope)
                 resolveStmt(stmt.elseBranch, scope)
             }
 
-            is Stmt.MatchStmt -> {
+            is Stmt.Match -> {
                 resolveExpr(stmt.scrutinee, scope)
                 stmt.branches?.let { branches ->
                     for (branch in branches) {
@@ -99,7 +99,7 @@ class Resolver(private val context: CompilerContext) {
                 }
             }
 
-            is Stmt.ForStmt -> {
+            is Stmt.For -> {
                 // for 循环引入新作用域；flag 是循环标签，不是变量，不解析
                 val child = scope.child()
                 stmt.varDecl?.let { resolveLoopVar(it, child) }
@@ -107,34 +107,34 @@ class Resolver(private val context: CompilerContext) {
                 resolveStmt(stmt.body, child)
             }
 
-            is Stmt.WhileStmt -> {
+            is Stmt.While -> {
                 // flag 是循环标签，不解析
                 resolveExpr(stmt.expr, scope)
                 resolveStmt(stmt.body, scope)
             }
 
-            is Stmt.BreakStmt, is Stmt.ContinueStmt -> {
+            is Stmt.Break, is Stmt.Continue -> {
                 // flag 是循环标签，不解析
             }
 
-            is Stmt.FnStmt -> {
+            is Stmt.Fn -> {
                 resolveFnStmt(stmt, scope)
             }
 
-            is Stmt.ReturnStmt -> {
+            is Stmt.Return -> {
                 stmt.expr?.let { resolveExpr(it, scope) }
             }
 
-            is Stmt.AssignStmt -> {
+            is Stmt.Assign -> {
                 resolveExpr(stmt.`var`, scope)
                 resolveExpr(stmt.value, scope)
             }
 
-            is Stmt.SetVarStmt -> {
+            is Stmt.SetVar -> {
                 resolveSetVarStmt(stmt, scope)
             }
 
-            is Stmt.EnumStmt -> {
+            is Stmt.Enum -> {
                 resolveEnumStmt(stmt, scope)
             }
         }
@@ -143,7 +143,7 @@ class Resolver(private val context: CompilerContext) {
     /**
      * 函数声明：登记函数符号、挂载 TypeScheme、绑定形参、解析函数体。
      */
-    private fun resolveFnStmt(stmt: Stmt.FnStmt, scope: Scope) {
+    private fun resolveFnStmt(stmt: Stmt.Fn, scope: Scope) {
         val fnName = (stmt.name?.literal as? String) ?: stmt.name?.type?.toString()
         if (fnName == null) {
             // 匿名/无名函数：只解析函数体，不登记
@@ -229,7 +229,7 @@ class Resolver(private val context: CompilerContext) {
      * `set` 声明变量：登记符号并绑定；随后解析其赋值语句。
      * var 可能是 `Identifier` `Annotation(Identifier, ...)`。
      */
-    private fun resolveSetVarStmt(stmt: Stmt.SetVarStmt, scope: Scope) {
+    private fun resolveSetVarStmt(stmt: Stmt.SetVar, scope: Scope) {
         val ident = unwrapIdentifier(stmt.`var`)
         if (ident != null) {
             // `set var<T>`：变量名携带类型实参是误用——变量不是泛型，
@@ -248,7 +248,7 @@ class Resolver(private val context: CompilerContext) {
         if (stmt.`var` is Expr.Annotation) {
             for (variant in stmt.`var`.annotations) resolveAnnotationNames(variant, scope)
         }
-        resolveStmt(stmt.assignStmt, scope)
+        resolveStmt(stmt.assign, scope)
     }
 
     /**
@@ -261,7 +261,7 @@ class Resolver(private val context: CompilerContext) {
      * 变体载荷只做「类型名 → DefId」的名称解析（填在注解/类型实参的 `defId` 上），
      * 载荷类型由 TypeInferencer 转换并转为构造器类型。
      */
-    private fun resolveEnumStmt(stmt: Stmt.EnumStmt, scope: Scope) {
+    private fun resolveEnumStmt(stmt: Stmt.Enum, scope: Scope) {
         val name = (stmt.name.token.literal as? String) ?: stmt.name.token.type.toString()
         val enumSymbol = declare(name, BuiltinType.Unknown, stmt.name.span, scope)
         stmt.defId = enumSymbol?.id
@@ -303,7 +303,7 @@ class Resolver(private val context: CompilerContext) {
                             ?.let { fieldIdent.defId = it.id }
                     }
                     for (annotation in field.annotations) resolveAnnotationNames(annotation, variantScope)
-                } else if (variant !is Stmt.EnumStmt.EnumVariant.Struct) {
+                } else if (variant !is Stmt.Enum.EnumVariant.Struct) {
                     // 元组变体 `Rgb(Num, Num)`：载荷本身就是类型表达式
                     // （结构体变体缺少 `: 类型` 时 Parser 已报错，不再当类型名解析以免级联报错）
                     resolveAnnotationNames(field, variantScope)

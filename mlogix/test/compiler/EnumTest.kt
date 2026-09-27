@@ -72,18 +72,18 @@ class EnumTest {
             """.trimIndent()
         )
 
-        val expected = Stmt.EnumStmt(
+        val expected = Stmt.Enum(
             span,
             Expr.Identifier(token(TokenType.IDENTIFIER, "Shape")),
             Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "T"))),
             Seq.with(
-                Stmt.EnumStmt.EnumVariant.Unit(span, Expr.Identifier(token(TokenType.IDENTIFIER, "Empty"))),
-                Stmt.EnumStmt.EnumVariant.Tuple(
+                Stmt.Enum.EnumVariant.Unit(span, Expr.Identifier(token(TokenType.IDENTIFIER, "Empty"))),
+                Stmt.Enum.EnumVariant.Tuple(
                     span,
                     Expr.Identifier(token(TokenType.IDENTIFIER, "Circle")),
                     Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "Num"))),
                 ),
-                Stmt.EnumStmt.EnumVariant.Struct(
+                Stmt.Enum.EnumVariant.Struct(
                     span,
                     Expr.Identifier(token(TokenType.IDENTIFIER, "Rect")),
                     Seq.with(
@@ -105,14 +105,14 @@ class EnumTest {
     @Test
     fun `parse comma separated variants on one line`() {
         val ast = parse("enum Color { Red, Green, Blue }")
-        val expected = Stmt.EnumStmt(
+        val expected = Stmt.Enum(
             span,
             Expr.Identifier(token(TokenType.IDENTIFIER, "Color")),
             null,
             Seq.with(
-                Stmt.EnumStmt.EnumVariant.Unit(span, Expr.Identifier(token(TokenType.IDENTIFIER, "Red"))),
-                Stmt.EnumStmt.EnumVariant.Unit(span, Expr.Identifier(token(TokenType.IDENTIFIER, "Green"))),
-                Stmt.EnumStmt.EnumVariant.Unit(span, Expr.Identifier(token(TokenType.IDENTIFIER, "Blue"))),
+                Stmt.Enum.EnumVariant.Unit(span, Expr.Identifier(token(TokenType.IDENTIFIER, "Red"))),
+                Stmt.Enum.EnumVariant.Unit(span, Expr.Identifier(token(TokenType.IDENTIFIER, "Green"))),
+                Stmt.Enum.EnumVariant.Unit(span, Expr.Identifier(token(TokenType.IDENTIFIER, "Blue"))),
             ),
         )
         assertProgram(ast, expected)
@@ -135,8 +135,8 @@ class EnumTest {
                 Expr.Literal(token(TokenType.NUM, 3.0)),
             ),
         )
-        val assign = Stmt.AssignStmt(span, varExpr, token(TokenType.ASSIGN), call)
-        assertProgram(ast, Stmt.SetVarStmt(span, varExpr, assign))
+        val assign = Stmt.Assign(span, varExpr, token(TokenType.ASSIGN), call)
+        assertProgram(ast, Stmt.SetVar(span, varExpr, assign))
     }
 
     // ========== 语义：正例 ==========

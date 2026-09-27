@@ -11,7 +11,6 @@ import mlogix.compiler.ast.Expr.ErrorExpr
 import mlogix.compiler.ast.Expr.Get
 import mlogix.compiler.ast.Pattern
 import mlogix.compiler.ast.Stmt
-import mlogix.compiler.ast.Stmt.*
 import mlogix.compiler.core.CompilerContext
 import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
@@ -58,7 +57,7 @@ class Parser(
             }
         }
 
-        return Program(Span(sourceFile.index, 0, sourceFile.length()), stmts)
+        return Stmt.Program(Span(sourceFile.index, 0, sourceFile.length()), stmts)
     }
 
     private fun statement(): Stmt? = when {
@@ -85,10 +84,10 @@ class Parser(
         val start = next() // consume 'use'
         val item = useItem() ?: return null
         if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-        return UseStmt(between(start, item), item)
+        return Stmt.Use(between(start, item), item)
     }
 
-    private fun useItem(): UseStmt.UseItem? {
+    private fun useItem(): Stmt.Use.UseItem? {
         val path = Seq<Expr.Identifier>()
         while (true) {
             when {
@@ -96,24 +95,24 @@ class Parser(
                     val id = next()
                     path.add(Expr.Identifier(id))
                     if (!match(TokenType.DOT)) {
-                        return UseStmt.Single(between(path[0], prevToken), path)
+                        return Stmt.Use.Single(between(path[0], prevToken), path)
                     }
                     if (isStmtEnd) break
                     continue
                 }
 
                 check(TokenType.STAR) -> {
-                    return UseStmt.All(if (path.isEmpty) next().span else between(path[0], next()), path)
+                    return Stmt.Use.All(if (path.isEmpty) next().span else between(path[0], next()), path)
                 }
 
                 check(TokenType.STAR_STAR) -> {
-                    return UseStmt.Recursion(if (path.isEmpty) next().span else between(path[0], next()), path)
+                    return Stmt.Use.Recursion(if (path.isEmpty) next().span else between(path[0], next()), path)
                 }
 
                 check(TokenType.LBRACE) -> {
                     val lbrace = next()
 
-                    val items = Seq<UseStmt.UseItem>()
+                    val items = Seq<Stmt.Use.UseItem>()
                     while (!match(TokenType.RBRACE)) {
                         val item = useItem()
                         if (item == null) {
@@ -123,7 +122,7 @@ class Parser(
                         }
                         match(TokenType.COMMA)
                     }
-                    return UseStmt.Multi(between((if (path.isEmpty) lbrace else path[0]), prevToken), path, items)
+                    return Stmt.Use.Multi(between((if (path.isEmpty) lbrace else path[0]), prevToken), path, items)
                 }
 
                 else -> break
@@ -144,13 +143,13 @@ class Parser(
                 error(bundle.get("diag.miss-block-end"))
                     .label(lBrace, bundle.get("diag.start"))
                     .label(lookAhead(0), bundle.get("diag.current"))
-                return BlockStmt(between(lBrace, prevToken), stmts)
+                return Stmt.Block(between(lBrace, prevToken), stmts)
             }
             statement()?.let { stmts.add(it) }
         }
         val rbrace = next()
 
-        return BlockStmt(between(lBrace, rbrace), stmts)
+        return Stmt.Block(between(lBrace, rbrace), stmts)
     }
 
     private fun ifStmt(): Stmt? {
@@ -163,7 +162,7 @@ class Parser(
         }
 
         if (expect(TokenType.LBRACE) == null) {
-            return IfStmt(between(start, condition), condition, null, null)
+            return Stmt.If(between(start, condition), condition, null, null)
         }
         val thenBranch = block()
 
@@ -172,12 +171,12 @@ class Parser(
             elseBranch = ifStmt()
         } else if (match(TokenType.ELSE)) {
             if (expect(TokenType.LBRACE) == null) {
-                return IfStmt(between(start, condition), condition, thenBranch, null)
+                return Stmt.If(between(start, condition), condition, thenBranch, null)
             }
             elseBranch = block()
         }
 
-        return IfStmt(between(start, prevToken), condition, thenBranch, elseBranch)
+        return Stmt.If(between(start, prevToken), condition, thenBranch, elseBranch)
     }
 
     private fun matchStmt(): Stmt? {
@@ -193,10 +192,10 @@ class Parser(
             error(bundle.get("diag.miss-match-brace"))
                 .label(start, bundle.get("diag.stmt-start"))
                 .label(lookAhead(0), bundle.get("diag.current"))
-            return MatchStmt(between(start, scrutinee), scrutinee, null)
+            return Stmt.Match(between(start, scrutinee), scrutinee, null)
         }
 
-        val branches = Seq<MatchStmt.MatchBranch>()
+        val branches = Seq<Stmt.Match.MatchBranch>()
         while (true) {
             // 分支之间允许任意换行（`check` 只在「位于换行后的下一个 token 是目标类型」时才跳过换行）
             while (lookAhead(0).type == TokenType.NEWLINE) next()
@@ -209,7 +208,7 @@ class Parser(
                 error(bundle.get("diag.miss-match-end"))
                     .label(start, bundle.get("diag.stmt-start"))
                     .label(lookAhead(0), bundle.get("diag.current"))
-                return MatchStmt(
+                return Stmt.Match(
                     between(start, (if (branches.isEmpty) start else branches[branches.size - 1])),
                     scrutinee,
                     branches,
@@ -231,7 +230,7 @@ class Parser(
 
             if (consume(TokenType.ARROW) == null) {
                 when (recoverByTokenTree(EnumSet.of(TokenType.NEWLINE, TokenType.RBRACE))) {
-                    TokenType.EOF -> return MatchStmt(
+                    TokenType.EOF -> return Stmt.Match(
                         between(start, (if (branches.isEmpty) start else branches[branches.size - 1])),
                         scrutinee,
                         branches,
@@ -241,9 +240,9 @@ class Parser(
                 }
             }
             val body = statement()
-            branches.add(MatchStmt.MatchBranch(between(pattern, prevToken), pattern, body))
+            branches.add(Stmt.Match.MatchBranch(between(pattern, prevToken), pattern, body))
         }
-        return MatchStmt(
+        return Stmt.Match(
             between(start, prevToken),
             scrutinee,
             branches,
@@ -353,11 +352,11 @@ class Parser(
                 TokenType.EOF -> Unit
                 else -> kotlin.error("Unreachable")
             }
-            return ForStmt(between(start, expr ?: varDecl!!), flag, varDecl, expr, null)
+            return Stmt.For(between(start, expr ?: varDecl!!), flag, varDecl, expr, null)
         }
         val body = block()
 
-        return ForStmt(between(start, body), flag, varDecl, expr, body)
+        return Stmt.For(between(start, body), flag, varDecl, expr, body)
 
     }
 
@@ -377,10 +376,10 @@ class Parser(
                 TokenType.EOF -> Unit
                 else -> kotlin.error("Unreachable")
             }
-            return WhileStmt(between(start, expr), flag, expr, null)
+            return Stmt.While(between(start, expr), flag, expr, null)
         }
         val body = block()
-        return WhileStmt(between(start, body), flag, expr, body)
+        return Stmt.While(between(start, body), flag, expr, body)
 
     }
 
@@ -406,7 +405,7 @@ class Parser(
         return null
     }
 
-    private fun fnStmt(): FnStmt {
+    private fun fnStmt(): Stmt.Fn {
         val start = next()
 
         val name = if (check(TokenType.IDENTIFIER)) next() else null
@@ -503,34 +502,34 @@ class Parser(
 
         if (check(TokenType.LBRACE)) {
             val body = block()
-            return FnStmt(between(start, body), name, typeParams, parameters, results, body)
+            return Stmt.Fn(between(start, body), name, typeParams, parameters, results, body)
         } else {
-            return FnStmt(between(start, prevToken), name, typeParams, parameters, results, null)
+            return Stmt.Fn(between(start, prevToken), name, typeParams, parameters, results, null)
         }
     }
 
     private fun breakStmt(): Stmt {
         val start = next()
-        if (matchStmtEnd()) return BreakStmt(start.span, null)
-        val flag = consume(TokenType.IDENTIFIER) ?: return BreakStmt(start.span, null)
+        if (matchStmtEnd()) return Stmt.Break(start.span, null)
+        val flag = consume(TokenType.IDENTIFIER) ?: return Stmt.Break(start.span, null)
         if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-        return BreakStmt(between(start, flag), Expr.Identifier(flag))
+        return Stmt.Break(between(start, flag), Expr.Identifier(flag))
     }
 
     private fun continueStmt(): Stmt {
         val start = next()
-        if (matchStmtEnd()) return ContinueStmt(start.span, null)
-        val flag = consume(TokenType.IDENTIFIER) ?: return ContinueStmt(start.span, null)
+        if (matchStmtEnd()) return Stmt.Continue(start.span, null)
+        val flag = consume(TokenType.IDENTIFIER) ?: return Stmt.Continue(start.span, null)
         if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-        return ContinueStmt(between(start, flag), Expr.Identifier(flag))
+        return Stmt.Continue(between(start, flag), Expr.Identifier(flag))
     }
 
     private fun returnStmt(): Stmt {
         val start = next()
-        if (matchStmtEnd()) return ReturnStmt(start.span, null)
+        if (matchStmtEnd()) return Stmt.Return(start.span, null)
         val expr = expression()
         if (expr is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-        return ReturnStmt(between(start, expr), expr)
+        return Stmt.Return(between(start, expr), expr)
     }
 
     private fun setStmt(): Stmt? {
@@ -557,10 +556,10 @@ class Parser(
         val assignStmt = assignStmt(expr)
         if (assignStmt == null) {
             if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-            return SetVarStmt(between(start, expr), expr, null)
+            return Stmt.SetVar(between(start, expr), expr, null)
         } else {
             if (assignStmt.value is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-            return SetVarStmt(between(start, assignStmt), expr, assignStmt)
+            return Stmt.SetVar(between(start, assignStmt), expr, assignStmt)
         }
     }
 
@@ -589,7 +588,7 @@ class Parser(
 
         var end: Token = name
         val fields = Seq<ASTNode>(6)
-        val methods = Seq<FnStmt>(3)
+        val methods = Seq<Stmt.Fn>(3)
         if (check(TokenType.LBRACE)) {
             end = next()
             var isCommaOptional = true
@@ -626,7 +625,7 @@ class Parser(
                     error(bundle.get("diag.miss-struct-item"))
                         .label(lookAhead(0))
                     when (recoverByTokenTree(TokenType.RECOVERY)) {
-                        TokenType.RBRACE -> return StructStmt(
+                        TokenType.RBRACE -> return Stmt.Struct(
                             between(start, next()),
                             Expr.Identifier(name),
                             typeParams,
@@ -640,7 +639,7 @@ class Parser(
                 }
             }
         }
-        return StructStmt(between(start, end), Expr.Identifier(name), typeParams, fields, methods)
+        return Stmt.Struct(between(start, end), Expr.Identifier(name), typeParams, fields, methods)
     }
 
     /**
@@ -681,7 +680,7 @@ class Parser(
         }
 
         var end: Token = name
-        val variants = Seq<EnumStmt.EnumVariant>(4)
+        val variants = Seq<Stmt.Enum.EnumVariant>(4)
         if (check(TokenType.LBRACE)) {
             end = next()
             var isSeparatorOptional = true
@@ -710,7 +709,7 @@ class Parser(
                     when (recoverByTokenTree(TokenType.RECOVERY)) {
                         TokenType.RBRACE -> {
                             end = next()
-                            return EnumStmt(between(start, end), Expr.Identifier(name), typeParams, variants)
+                            return Stmt.Enum(between(start, end), Expr.Identifier(name), typeParams, variants)
                         }
 
                         TokenType.IDENTIFIER -> {
@@ -727,7 +726,7 @@ class Parser(
                 .label(start, bundle.get("diag.stmt-start"))
                 .label(lookAhead(0), bundle.get("diag.current"))
         }
-        return EnumStmt(between(start, end), Expr.Identifier(name), typeParams, variants)
+        return Stmt.Enum(between(start, end), Expr.Identifier(name), typeParams, variants)
     }
 
     /**
@@ -736,7 +735,7 @@ class Parser(
      * - 元组变体 `Rgb(Num, Num, Num)`：载荷是类型表达式
      * - 结构体变体 `Named { name: Str, alpha: Num }`：载荷是 `字段名 : 类型` 注解
      */
-    private fun enumVariant(): EnumStmt.EnumVariant? {
+    private fun enumVariant(): Stmt.Enum.EnumVariant? {
         val variantName = consume(TokenType.IDENTIFIER) {
             error(bundle.get("diag.miss-variant-name"))
                 .label(lookAhead(0))
@@ -767,7 +766,7 @@ class Parser(
                         .label(lParen, bundle.get("diag.variant-field-start"))
                 }
             )
-            return EnumStmt.EnumVariant.Tuple(between(variantName, prevToken), ident, fields)
+            return Stmt.Enum.EnumVariant.Tuple(between(variantName, prevToken), ident, fields)
         }
 
         // 结构体变体 `Named { name: Str, alpha: Num }`
@@ -778,13 +777,13 @@ class Parser(
             while (true) {
                 if (check(TokenType.RBRACE)) {
                     val rBrace = next()
-                    return EnumStmt.EnumVariant.Struct(between(variantName, rBrace), ident, fields)
+                    return Stmt.Enum.EnumVariant.Struct(between(variantName, rBrace), ident, fields)
                 }
                 if (isAtEnd) {
                     error(bundle.get("diag.miss-variant-struct-end"))
                         .label(lBrace, bundle.get("diag.variant-field-start"))
                         .label(lookAhead(0), bundle.get("diag.current"))
-                    return EnumStmt.EnumVariant.Struct(between(variantName, prevToken), ident, fields)
+                    return Stmt.Enum.EnumVariant.Struct(between(variantName, prevToken), ident, fields)
                 }
                 if (check(TokenType.IDENTIFIER)) {
                     if (!isCommaOptional) {
@@ -806,10 +805,10 @@ class Parser(
                     when (recoverByTokenTree(EnumSet.of(TokenType.COMMA, TokenType.NEWLINE, TokenType.RBRACE))) {
                         TokenType.RBRACE -> {
                             val rBrace = next()
-                            return EnumStmt.EnumVariant.Struct(between(variantName, rBrace), ident, fields)
+                            return Stmt.Enum.EnumVariant.Struct(between(variantName, rBrace), ident, fields)
                         }
 
-                        TokenType.EOF -> return EnumStmt.EnumVariant.Struct(
+                        TokenType.EOF -> return Stmt.Enum.EnumVariant.Struct(
                             between(variantName, prevToken),
                             ident,
                             fields
@@ -825,7 +824,7 @@ class Parser(
         }
 
         // 单元变体 `Red`
-        return EnumStmt.EnumVariant.Unit(variantName.span, ident)
+        return Stmt.Enum.EnumVariant.Unit(variantName.span, ident)
     }
 
     private fun exprStmt(): Stmt? {
@@ -839,7 +838,7 @@ class Parser(
 
         if (assignStmt == null) {
             if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-            return ExprStmt(expr.span, expr)
+            return Stmt.ExprStmt(expr.span, expr)
         } else {
             if (assignStmt.value is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return assignStmt
@@ -851,7 +850,7 @@ class Parser(
      * @param expr `=`或复合赋值运算符前的表达式
      * @return 没有`=`或者复合赋值运算符时返回null;有时返回AssignStmt并推进
      */
-    private fun assignStmt(expr: Expr): AssignStmt? {
+    private fun assignStmt(expr: Expr): Stmt.Assign? {
         if (isStmtEnd) {
             if (check(TokenType.ASSIGNS)) {
                 error(bundle.get("diag.assign-missing-lhs"))
@@ -869,7 +868,7 @@ class Parser(
                 return null
             }
             val value = expression()
-            return AssignStmt(between(expr, value), expr, operator, value)
+            return Stmt.Assign(between(expr, value), expr, operator, value)
 
         } else if (check(TokenType.ASSIGNS)) {
             val operator = next()
@@ -880,7 +879,7 @@ class Parser(
                 return null
             }
             val right = expression()
-            return AssignStmt(
+            return Stmt.Assign(
                 between(expr, right),
                 expr,
                 operator,

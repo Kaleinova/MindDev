@@ -10,7 +10,7 @@ import mlogix.compiler.core.token.Token
 abstract class Stmt(span: Span) : ASTNode(span) {
     data class Program(override val span: Span, val stmts: Seq<Stmt>) : Stmt(span)
 
-    data class UseStmt(override val span: Span, val item: UseItem) : Stmt(span) {
+    data class Use(override val span: Span, val item: UseItem) : Stmt(span) {
 
         abstract class UseItem(open val span: Span) : Spanned {
             override fun span(): Span {
@@ -31,14 +31,14 @@ abstract class Stmt(span: Span) : ASTNode(span) {
             UseItem(span)
     }
 
-    data class BlockStmt(override val span: Span, val stmts: Seq<Stmt>) : Stmt(span)
+    data class Block(override val span: Span, val stmts: Seq<Stmt>) : Stmt(span)
 
     data class ExprStmt(override val span: Span, val expr: Expr) : Stmt(span)
 
-    data class IfStmt(override val span: Span, val condition: Expr, val thenBranch: Stmt?, val elseBranch: Stmt?) :
+    data class If(override val span: Span, val condition: Expr, val thenBranch: Stmt?, val elseBranch: Stmt?) :
         Stmt(span)
 
-    data class MatchStmt(override val span: Span, val scrutinee: Expr, val branches: Seq<MatchBranch>?) : Stmt(span) {
+    data class Match(override val span: Span, val scrutinee: Expr, val branches: Seq<MatchBranch>?) : Stmt(span) {
         data class MatchBranch(val span: Span, val pattern: Pattern, val body: Stmt?) : Spanned {
             override fun span(): Span {
                 return this.span
@@ -46,7 +46,7 @@ abstract class Stmt(span: Span) : ASTNode(span) {
         }
     }
 
-    data class ForStmt(
+    data class For(
         override val span: Span,
         val flag: Expr.Identifier?,
         val varDecl: Expr.Identifier?,
@@ -54,14 +54,14 @@ abstract class Stmt(span: Span) : ASTNode(span) {
         val body: Stmt?
     ) : Stmt(span)
 
-    data class WhileStmt(override val span: Span, val flag: Expr.Identifier?, val expr: Expr, val body: Stmt?) :
+    data class While(override val span: Span, val flag: Expr.Identifier?, val expr: Expr, val body: Stmt?) :
         Stmt(span)
 
-    data class BreakStmt(override val span: Span, val flag: Expr.Identifier?) : Stmt(span)
+    data class Break(override val span: Span, val flag: Expr.Identifier?) : Stmt(span)
 
-    data class ContinueStmt(override val span: Span, val flag: Expr.Identifier?) : Stmt(span)
+    data class Continue(override val span: Span, val flag: Expr.Identifier?) : Stmt(span)
 
-    data class FnStmt(
+    data class Fn(
         override val span: Span,
         val name: Token?,
         val typeParams: Seq<Expr.Identifier>?,
@@ -73,19 +73,19 @@ abstract class Stmt(span: Span) : ASTNode(span) {
         var defId: DefId? = null
     }
 
-    data class ReturnStmt(override val span: Span, val expr: Expr?) : Stmt(span)
+    data class Return(override val span: Span, val expr: Expr?) : Stmt(span)
 
-    data class AssignStmt(override val span: Span, val `var`: Expr, val operator: Token, val value: Expr) : Stmt(span)
+    data class Assign(override val span: Span, val `var`: Expr, val operator: Token, val value: Expr) : Stmt(span)
 
-    data class SetVarStmt(override val span: Span, val `var`: Expr, val assignStmt: AssignStmt?) : Stmt(span)
+    data class SetVar(override val span: Span, val `var`: Expr, val assign: Assign?) : Stmt(span)
 
-    data class StructStmt(
+    data class Struct(
         override val span: Span,
         val name: Expr.Identifier,
         val typeParams: Seq<Expr.Identifier>?,
         /** 字段**声明** */
         val fields: Seq<ASTNode>,
-        val methods: Seq<FnStmt>
+        val methods: Seq<Fn>
     ) : Stmt(span)
 
     /**
@@ -105,7 +105,7 @@ abstract class Stmt(span: Span) : ASTNode(span) {
      * - 结构体变体 `Named { name: Str, alpha: Num }` —— 构造器（字段名只用于诊断与文档，
      *   调用处不支持具名实参）。
      */
-    data class EnumStmt(
+    data class Enum(
         override val span: Span,
         val name: Expr.Identifier,
         val typeParams: Seq<Expr.Identifier>?,

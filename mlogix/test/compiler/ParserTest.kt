@@ -63,13 +63,13 @@ class ParserTest {
         val ast = parse("set a = 1")
 
         val varExpr = Expr.Identifier(token(TokenType.IDENTIFIER, "a"))
-        val assign = Stmt.AssignStmt(
+        val assign = Stmt.Assign(
             span,
             varExpr,
             token(TokenType.ASSIGN),
             Expr.Literal(token(TokenType.INT, 1.0))
         )
-        val expected = Stmt.SetVarStmt(span, varExpr, assign)
+        val expected = Stmt.SetVar(span, varExpr, assign)
         assertEquals(ast, expected)
     }
 
@@ -78,10 +78,10 @@ class ParserTest {
         val ast = parse("if 1 { 2 } else { 3 }")
 
         val condition = Expr.Literal(token(TokenType.INT, 1.0))
-        val thenBranch = Stmt.BlockStmt(span, Seq.with(Stmt.ExprStmt(span, Expr.Literal(token(TokenType.INT, 2.0)))))
-        val elseBranch = Stmt.BlockStmt(span, Seq.with(Stmt.ExprStmt(span, Expr.Literal(token(TokenType.INT, 3.0)))))
+        val thenBranch = Stmt.Block(span, Seq.with(Stmt.ExprStmt(span, Expr.Literal(token(TokenType.INT, 2.0)))))
+        val elseBranch = Stmt.Block(span, Seq.with(Stmt.ExprStmt(span, Expr.Literal(token(TokenType.INT, 3.0)))))
 
-        val expected = Stmt.IfStmt(span, condition, thenBranch, elseBranch)
+        val expected = Stmt.If(span, condition, thenBranch, elseBranch)
         assertEquals(ast, expected)
     }
 
@@ -97,7 +97,7 @@ class ParserTest {
             token(TokenType.COLON_LESS),
             Expr.Identifier(token(TokenType.IDENTIFIER, "links")),
         )
-        val body = Stmt.BlockStmt(
+        val body = Stmt.Block(
             span,
             Seq.with(
                 Stmt.ExprStmt(
@@ -110,18 +110,18 @@ class ParserTest {
                 )
             )
         )
-        val expected = Stmt.ForStmt(span, flag, varDecl, expr, body)
+        val expected = Stmt.For(span, flag, varDecl, expr, body)
         assertEquals(ast, expected)
     }
 
     @Test
     fun `parse while`() {
         val ast = parse("loop: while true { continue }")
-        val expectedWhile = Stmt.WhileStmt(
+        val expectedWhile = Stmt.While(
             span,
             Expr.Identifier(token(TokenType.IDENTIFIER, "loop")),
             Expr.Literal(token(TokenType.TRUE)),
-            Stmt.BlockStmt(span, Seq.with(Stmt.ContinueStmt(span, null)))
+            Stmt.Block(span, Seq.with(Stmt.Continue(span, null)))
         )
         assertEquals(ast, expectedWhile)
     }
@@ -167,9 +167,9 @@ class ParserTest {
                 Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "Str")))
             )
         )
-        val body = Stmt.BlockStmt(
+        val body = Stmt.Block(
             span, Seq.with(
-                Stmt.ReturnStmt(
+                Stmt.Return(
                     span, Expr.Binary(
                         Expr.Identifier(token(TokenType.IDENTIFIER, "a")),
                         token(TokenType.PLUS),
@@ -179,7 +179,7 @@ class ParserTest {
             )
         )
 
-        val expectedFn = Stmt.FnStmt(span, name, null, Seq.with(aParam, bParam), results, body)
+        val expectedFn = Stmt.Fn(span, name, null, Seq.with(aParam, bParam), results, body)
         assertEquals(ast, expectedFn)
     }
 
@@ -207,8 +207,8 @@ class ParserTest {
                 Expr.Literal(token(TokenType.INT, 1.0)), Expr.Literal(token(TokenType.INT, 2.0))
             )
         )
-        val assign = Stmt.AssignStmt(span, varExpr, token(TokenType.ASSIGN), array)
-        val expected = Stmt.SetVarStmt(span, varExpr, assign)
+        val assign = Stmt.Assign(span, varExpr, token(TokenType.ASSIGN), array)
+        val expected = Stmt.SetVar(span, varExpr, assign)
         assertEquals(ast, expected)
     }
 
@@ -227,12 +227,12 @@ class ParserTest {
         )
 
         val scrutinee = Expr.Identifier(token(TokenType.IDENTIFIER, "c"))
-        val emptyBlock = Stmt.BlockStmt(span, Seq(0))
-        val expected = Stmt.MatchStmt(
+        val emptyBlock = Stmt.Block(span, Seq(0))
+        val expected = Stmt.Match(
             span,
             scrutinee,
             Seq.with(
-                Stmt.MatchStmt.MatchBranch(
+                Stmt.Match.MatchBranch(
                     span,
                     Pattern.Variant(
                         span,
@@ -242,9 +242,9 @@ class ParserTest {
                         ),
                         Seq(0),
                     ),
-                    Stmt.BlockStmt(span, Seq.with(Stmt.BreakStmt(span, null))),
+                    Stmt.Block(span, Seq.with(Stmt.Break(span, null))),
                 ),
-                Stmt.MatchStmt.MatchBranch(
+                Stmt.Match.MatchBranch(
                     span,
                     Pattern.Variant(
                         span,
@@ -256,8 +256,8 @@ class ParserTest {
                     ),
                     emptyBlock,
                 ),
-                Stmt.MatchStmt.MatchBranch(span, Pattern.Wildcard(span), emptyBlock),
-                Stmt.MatchStmt.MatchBranch(
+                Stmt.Match.MatchBranch(span, Pattern.Wildcard(span), emptyBlock),
+                Stmt.Match.MatchBranch(
                     span,
                     Pattern.Binding(span, Expr.Identifier(token(TokenType.IDENTIFIER, "y"))),
                     emptyBlock,
@@ -270,11 +270,11 @@ class ParserTest {
     @Test
     fun `parse nested variant pattern`() {
         val ast = parse("match o { Option.Some(Option.None) -> { } }")
-        val expected = Stmt.MatchStmt(
+        val expected = Stmt.Match(
             span,
             Expr.Identifier(token(TokenType.IDENTIFIER, "o")),
             Seq.with(
-                Stmt.MatchStmt.MatchBranch(
+                Stmt.Match.MatchBranch(
                     span,
                     Pattern.Variant(
                         span,
@@ -293,7 +293,7 @@ class ParserTest {
                             )
                         ),
                     ),
-                    Stmt.BlockStmt(span, Seq(0)),
+                    Stmt.Block(span, Seq(0)),
                 )
             ),
         )

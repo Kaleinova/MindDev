@@ -157,20 +157,20 @@ class TypeInferencer(val context: CompilerContext) {
      *
      * 注解只支持单一枚举值；`set a : Int | Str` 这类多枚举值仍由 [annotationToType] 报 union-not-supported。
      */
-    private fun analyzeSetVarStmt(stmt: Stmt.SetVarStmt) {
+    private fun analyzeSetVarStmt(stmt: Stmt.SetVar) {
         val annotation = stmt.`var` as? Expr.Annotation
         val declared = annotation?.let { TypeAnnotation(annotationToType(it), annotationToOrigin(it)) }
         val symbol = unwrapIdentifier(stmt.`var`)?.defId?.let { symbolTable.get(it) }
 
-        val assign = stmt.assignStmt
+        val assign = stmt.assign
         if (assign == null) {
             // `set a`：符号保持 Unknown；有注解则以注解为准
             if (declared != null && symbol != null) symbol.type = declared.type
             return
         }
 
-        // 与 AssignStmt 相同的推断，但每个表达式只推断一次并做符号类型快速传播：
-        // 递归 analyzeStmt(assignStmt) 会让同一 RHS 被推断两次、其上的错误重复上报。
+        // 与 Assign 相同的推断，但每个表达式只推断一次并做符号类型快速传播：
+        // 递归 analyzeStmt(assign) 会让同一 RHS 被推断两次、其上的错误重复上报。
         val lr = inferExpr(assign.`var`)
         constraints.addAll(lr.constraints)
         val valueR = inferExpr(assign.value, declared?.let { ExpectedType(it.type, it.origin) })
@@ -286,11 +286,11 @@ class TypeInferencer(val context: CompilerContext) {
                 for (s in stmt.stmts) analyzeStmt(s)
             }
 
-            is Stmt.UseStmt -> {
+            is Stmt.Use -> {
                 // imports / use ignored by current analyzer
             }
 
-            is Stmt.BlockStmt -> {
+            is Stmt.Block -> {
                 for (s in stmt.stmts) analyzeStmt(s)
             }
 
@@ -299,7 +299,7 @@ class TypeInferencer(val context: CompilerContext) {
                 constraints.addAll(expr.constraints)
             }
 
-            is Stmt.IfStmt -> {
+            is Stmt.If -> {
                 val cond = inferExpr(stmt.condition)
                 constraints.addAll(cond.constraints)
                 constraints.add(Constraint.Equal(cond.type, BuiltinType.Bool, stmt.condition.span))
@@ -307,7 +307,7 @@ class TypeInferencer(val context: CompilerContext) {
                 analyzeStmt(stmt.elseBranch)
             }
 
-            is Stmt.MatchStmt -> {
+            is Stmt.Match -> {
                 val scrutinee = inferExpr(stmt.scrutinee)
                 constraints.addAll(scrutinee.constraints)
 
@@ -334,14 +334,14 @@ class TypeInferencer(val context: CompilerContext) {
                 }
             }
 
-            is Stmt.ForStmt -> {
+            is Stmt.For -> {
                 // flag 是循环标签，不是变量，不推断
                 stmt.varDecl?.let { val r = inferExpr(it); constraints.addAll(r.constraints) }
                 stmt.expr?.let { val r = inferExpr(it); constraints.addAll(r.constraints) }
                 analyzeStmt(stmt.body)
             }
 
-            is Stmt.WhileStmt -> {
+            is Stmt.While -> {
                 // flag 是循环标签，不推断
                 val cond = inferExpr(stmt.expr)
                 constraints.addAll(cond.constraints)
@@ -349,15 +349,15 @@ class TypeInferencer(val context: CompilerContext) {
                 analyzeStmt(stmt.body)
             }
 
-            is Stmt.BreakStmt, is Stmt.ContinueStmt -> {
+            is Stmt.Break, is Stmt.Continue -> {
                 // nothing
             }
 
-            is Stmt.FnStmt -> {
+            is Stmt.Fn -> {
                 analyzeFnStmt(stmt)
             }
 
-            is Stmt.ReturnStmt -> {
+            is Stmt.Return -> {
                 if (returnContextStack.isEmpty) {
                     stmt.expr?.let { val r = inferExpr(it); constraints.addAll(r.constraints) }
                     return
@@ -384,7 +384,7 @@ class TypeInferencer(val context: CompilerContext) {
                 }
             }
 
-            is Stmt.AssignStmt -> {
+            is Stmt.Assign -> {
                 // analyze both sides
                 val lr = inferExpr(stmt.`var`)
                 constraints.addAll(lr.constraints)
@@ -412,11 +412,11 @@ class TypeInferencer(val context: CompilerContext) {
                 // TODO non-identifier LHS (e.g. indexing, field access): subexpressions already analyzed above.
             }
 
-            is Stmt.SetVarStmt -> {
+            is Stmt.SetVar -> {
                 analyzeSetVarStmt(stmt)
             }
 
-            is Stmt.EnumStmt -> {
+            is Stmt.Enum -> {
                 analyzeEnumStmt(stmt)
             }
 
@@ -443,7 +443,7 @@ class TypeInferencer(val context: CompilerContext) {
      * - 本方法只做「已解析注解表达式 → [Type]」的转换（[annotationToType]）；
      * - [TypeSolver] 只负责求解，不做名字解析、不做类型构造。
      */
-    private fun analyzeFnStmt(stmt: Stmt.FnStmt) {
+    private fun analyzeFnStmt(stmt: Stmt.Fn) {
         val fnSymbol = stmt.defId?.let { symbolTable.get(it) }
         if (fnSymbol == null) {
             // 无名函数或解析失败：仍尝试分析函数体
@@ -581,7 +581,7 @@ class TypeInferencer(val context: CompilerContext) {
      * - 类型方案 `∀T. (T) -> Option<T>` 让每个访问点实例化出独立的类型变量（多态，
      *   与泛型函数同机制），因此 `Option.Some(1)` 与 `Option.Some("s")` 互不干扰。
      */
-    private fun analyzeEnumStmt(stmt: Stmt.EnumStmt) {
+    private fun analyzeEnumStmt(stmt: Stmt.Enum) {
         val enumSymbol = stmt.defId?.let { symbolTable.get(it) } ?: return
 
         // 泛型形参：每个类型参数分配 fresh 变量并写入类型参数符号（与泛型函数一致）
