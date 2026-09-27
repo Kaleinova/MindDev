@@ -1,9 +1,12 @@
 package mlogix.compiler.core.symbol
 
 import arc.struct.ObjectMap
+import arc.struct.OrderedMap
 import arc.struct.Seq
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.type.Type
+import mlogix.util.Ansi
+import kotlin.math.max
 
 /**
  * 符号表：以 [DefId] 为中心的定义仓库（对齐 rustc 的 DefId 表）。
@@ -14,7 +17,7 @@ import mlogix.compiler.core.type.Type
  */
 class SymbolTable {
     private var nextId: Int = 0
-    private val symbols = ObjectMap<DefId, Symbol>()
+    private val symbols = OrderedMap<DefId, Symbol>()
 
     /**
      * 登记一个新定义，分配 [DefId]。
@@ -41,6 +44,49 @@ class SymbolTable {
             seq.add(entry.value)
         }
         return seq
+    }
+
+    fun pretty(): String {
+        return buildString {
+            appendLine("SymbolTable")
+
+            val all = all()
+            var maxIdStrLen = 2
+            var maxNameStrLen = 4
+            var maxTypeStrLen = 4
+            all.forEach {
+                maxIdStrLen = max(maxIdStrLen, it.id.toString().length)
+                maxNameStrLen = max(maxNameStrLen, it.name.length)
+                maxTypeStrLen = max(maxTypeStrLen, it.type.pretty().length)
+            }
+
+            append(Ansi.CYAN)
+            append(" ".repeat(maxIdStrLen - 2) + "id")
+            append(" | ")
+            append(" ".repeat(maxNameStrLen - 4) + "name")
+            append(" | ")
+            append(" ".repeat(maxTypeStrLen - 4) + "type")
+            appendLine(Ansi.DEFAULT)
+
+
+            all.forEach {
+                val idStr = it.id.toString()
+                val idStrLen = idStr.length
+                append(" ".repeat(maxIdStrLen - idStrLen) + idStr)
+                append(Ansi.CYAN + " | " + Ansi.DEFAULT)
+
+                val name = it.name
+                val nameLen = name.length
+                append(" ".repeat(maxNameStrLen - nameLen) + name)
+                append(Ansi.CYAN + " | " + Ansi.DEFAULT)
+
+                val typeStr = it.type.pretty()
+                val typeStrLen = typeStr.length
+                append(" ".repeat(maxTypeStrLen - typeStrLen) + typeStr)
+
+                appendLine()
+            }
+        }
     }
 }
 

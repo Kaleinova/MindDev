@@ -46,6 +46,8 @@ class Compiler(projectPath: Fi, private val config: CompilerConfig) {
                     if (Log.isAllowed(Log.LogType.DEBUG)) {
                         ASTPrinter.print(result.ast, sourceFile)
                         println()
+
+                        println(result.symbolTable.pretty())
                     }
                 }
             }

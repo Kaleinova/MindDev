@@ -7,5 +7,9 @@ package mlogix.compiler.core.symbol
  * 具体信息（类型、作用域）通过 [SymbolTable] 按 [DefId] 查询，
  * 而不是用 `Map<String, Type>` 按名称查询。这彻底解耦了"名称解析"与"类型推断"。
  */
-data class DefId(val id: Int)
+data class DefId(val id: Int) {
+    override fun toString(): String {
+        return "$id"
+    }
+}
 

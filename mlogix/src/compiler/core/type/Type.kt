@@ -60,7 +60,7 @@ sealed class Type {
      * 友好打印类型（用于诊断消息；区别于 data class 自动生成的 `toString`）。
      */
     fun pretty(): String = when (this) {
-        is Con -> name
+        is Con -> "Con($name)"
         is Var -> "Var($index)"
         is Func -> "(${params.joinToString(", ") { it.pretty() }}) -> ${result.pretty()}"
         is Arr -> "Array<${element.pretty()}>"
