@@ -4,7 +4,7 @@
 
 ## 快速开始
 
-所有命令都在**仓库根**（`MindDev/`）执行：
+所有命令都在**仓库根**（`MindDev/`）执行，执行时自动编译项目（无需手动编译）：
 
 | 目的 | 命令 |
 | --- | --- |
@@ -24,9 +24,9 @@
   同样能读到 `mlogix/mlogix_test/test.mlx`）。
 - **任务名**：`:mlogix:compile` 是精确写法；裸 `compile` 等效（根工程没这个任务，Gradle 任务名匹配会落到 `:mlogix:compile`）。
   但**测试必须写 `:mlogix:test`**：裸 `test` 会跑所有子工程（`:minddev:test` + `:mlogix:test`），既慢又混入无关失败。
-- **构建要写工作区外的 `~/.gradle`**（守护进程、依赖缓存、wrapper dist）。在限制写工作区的沙箱里第一次构建会以
+- **构建要写工作区外的 `~/.gradle`**（守护进程、依赖缓存、wrapper dist）。在限制写工作区的沙箱里构建可能会以
   `FileNotFoundException: ...\.gradle\wrapper\dists\...\gradle-9.7.0-bin.zip.lck (拒绝访问)` 失败——这不是工程问题，
-  也别换写法重试：直接以更宽权限（`danger-full-access`）重跑**同一条**命令一次。
+  也别换写法重试：直接一开始就以更宽权限跑。
 - **中文输出乱码**：控制台本身是 UTF-8，但 fork 出的 JVM 用平台默认字符集（中文 Windows 即 GBK）写 stdout，于是
   `类型不匹配` 变成 `���Ͳ�ƥ��`；Gradle 打印**构建脚本里的中文**（如任务 `description`）也会乱。跑任何命令前先设
   `$env:JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8"`。单测断言走 `I18N.bundle`，与字符集无关。
@@ -49,7 +49,7 @@
 > 本文件路径都是**仓库根相对**。源码根是 `mlogix/src/`，包名才是 `mlogix.*`——**不存在 `mlogix/src/mlogix/` 这一层**
 > （旧文档按包名臆造过，别踩）。
 
-- 本仓库是一个小型语言前端（lexer → parser → AST → 语义分析 → 问题报告）。
+- 本仓库是一个语言编译器。
 - 入口 `mlogix/src/Main.kt`（解析 CLI 参数并调用 `Compiler`）；编排 `mlogix/src/compiler/Compiler.kt`（创建
   `Lexer`、`Parser`、`DiagHandler`、`SourceMap`，装配 `Pipeline` 并按文件跑各阶段）。**加新功能以 `Compiler.kt` 为准。**
 - **Pass 流水线** `mlogix/src/compiler/pipeline/Pipeline.kt`：按序执行一串 `CompilerPass`（契约
@@ -110,26 +110,32 @@
 - 测试用 JUnit 5（配置见 `mlogix/build.gradle.kts`）：`mlogix/test/compiler/LexerTest.kt` 展示如何实例化 `Lexer` 并断言
   token 序列；`mlogix/test/compiler/ParserTest.kt` 展示 `parser.parse("2 + 3")`。
 
-使用类似rust的面向对象系统
-
 ## 调试诊断/语义问题的推荐手法（别用「改一版跑一次」盲猜）
 
 - **短反馈回路**：改 `mlogix/mlogix_test/test.mlx` → `:mlogix:compile`（约 5 秒，打印真实诊断）。
-- **诊断计数/文案**：在 `mlogix/test/compiler/*Test.kt` 里加一个临时 `@Test`，复用该文件已有的 `analyze(source)`：
-  ```kotlin
-  @Test fun zzTempDump() {
-      analyze(""" ... """.trimIndent())
-      println("TMP-ERRORS: " + context.diagHandler.errors.joinToString(" | ") { it.message })
-      println("TMP-WARNINGS: " + context.diagHandler.warnings.joinToString(" | ") { it.message })
-  }
-  ```
-  跑 `.\gradlew.bat :mlogix:test --tests "mlogix.compiler.MatchTest" --console=plain -i 2>&1 | Select-String "TMP-"`
-  只看自己那几行。**临时测试用完必须删掉**，再跑一次全量确认干净。
-- **先插桩确认数据，再改逻辑**：`Type.pretty()`、`Seq.joinToString` 足以定位「数据到没到这儿」。曾有教训：没先确认实参
-  就连续盲改 `useful()`，白跑 5 次构建；插桩后发现真因是「枚举名压根没参与比较」。
+- **诊断计数/文案**：在 `mlogix/test/compiler/*Test.kt` 里加一个临时 `@Test`（用完删掉），复用该文件已有的 `analyze(source)`
+  跑 `.\gradlew.bat :mlogix:test --tests "mlogix.compiler.*Test" --console=plain --rerun-tasks 2>&1`。
+- **先插桩确认数据，再改逻辑**：用`Type.pretty()`、`Seq.joinToString` 定位「数据到没到这儿」。
 - **失败先读** `mlogix/build/test-results/test/TEST-*.xml`（UTF-8，用 `Get-Content -Encoding UTF8` 读，否则中文断言消息
   乱码）——`message=` 已带断言文本，不必重跑测试。
-- 一次只改一处、跑一次：多改叠加后失败时无法区分是哪一处导致的。
+- **一次只改一处、跑一次**：多改叠加后失败时无法区分是哪一处导致的。但**插桩除外**：插桩是只读的，为了少跑几个来回，
+  应在**同一次**改动里把可疑路径的入口、分支与关键值一次打全。
+- **从报错点逆推，不要从表达式树顶顺推**：定位「这个类型不匹配是谁加的约束」时，直接在
+  `TypeSolver.reportMismatch` 里打 `t1/t2` + `Throwable().stackTrace`，比在上层逐个分支加 print 快一个数量级。
+- **同一诊断报两次时，别靠猜**：在解析侧给节点打一个「已按接收者类型查过」的负标记（比如 `DefId(-1)`），
+  比宽泛地去重更可靠。
+
+### 类型方案与符号类型必须一致
+
+- `Symbol.type` 与 `Symbol.typeScheme.body` 不能各说各话：推断期往符号里写的是哪一种，值位置读结构体名/成员时就必须
+  用同一种。本次 struct 的实证：结构体符号的 `type` 是自我类型（`Con`/`App`）、而 `typeScheme.body` 是**构造器**
+  （`(字段类型...) -> 结构体类型`），二者分工明确；若调用点改用 `typeScheme.body` 代表「方法签名」，就会拿到
+  Resolver 挂的占位 `Fn`（实测踩过，报出「期望 Fn，实际 () -> Var」）。
+- 泛型形参的 `DefId` **只能有一个**：`resolveTypeParam` 会回填 `typeParam.defId`，所以**不要**为了给另一个作用域
+  （如「字段默认值只看得到类型参数」）也绑定同名参数而再调一次它——那会把 `defId` 覆盖成后一个符号，
+  字段类型注解解析到另一个符号，推断写进去的类型字段永远看不到。
+- 方法符号**只声明一次**：Resolver 已在成员表里 `declare` 过，就不要再走会 `declare` 的常规函数解析路径，
+  否则同名两个符号各自持有半份信息。
 
 ## 集成点与外部依赖
 
@@ -142,8 +148,6 @@
 
 - 面向用户的语法与速查指南：`docs/grammar/index.md`、`docs/grammar/fast-learning.md`。
 - 语义分析设计（约束生成 + 惰性求解）：`docs/design/semantic-analyzer.md`。
-- parser 错误恢复思路：`mlogix/src/compiler/TODO-scope_stack.md`。
-- 高层路线图：`mlogix/TODO.md`。
 - 语言使用者文档与许可证：`mlogix/README.md`、`docs/`。
 
 ## 若还需更多上下文

@@ -5,7 +5,6 @@ import arc.func.Cons
 import arc.func.Prov
 import arc.struct.Queue
 import arc.struct.Seq
-import mlogix.compiler.ast.ASTNode
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Expr.ErrorExpr
 import mlogix.compiler.ast.Expr.Get
@@ -587,7 +586,7 @@ class Parser(
         }
 
         var end: Token = name
-        val fields = Seq<ASTNode>(6)
+        val fields = Seq<Stmt.Struct.StructField>(6)
         val methods = Seq<Stmt.Fn>(3)
         if (check(TokenType.LBRACE)) {
             end = next()
@@ -602,20 +601,8 @@ class Parser(
                         error(bundle.get("diag.miss-struct-field-separator"))
                             .label(lookAhead(0))
                     }
-                    val id = annotation(Expr.Identifier(next()))
-                    val assign = assignStmt(id)
-                    if (assign == null) {
-                        fields.add(id)
-                        isCommaOptional = match(TokenType.COMMA) || matchStmtEnd()
-                    } else {
-                        if (assign.value is ErrorExpr) {
-                            fields.add(id)
-                            recoverByTokenTree(TokenType.RECOVERY + TokenType.NEWLINE)
-                        } else {
-                            fields.add(assign)
-                        }
-                        isCommaOptional = match(TokenType.COMMA) || matchStmtEnd()
-                    }
+                    structField()?.let { fields.add(it) }
+                    isCommaOptional = match(TokenType.COMMA) || matchStmtEnd()
 
                 } else if (check(TokenType.FN)) {
                     methods.add(fnStmt())
@@ -640,6 +627,48 @@ class Parser(
             }
         }
         return Stmt.Struct(between(start, end), Expr.Identifier(name), typeParams, fields, methods)
+    }
+
+    /**
+     * 结构体字段声明 `名字 [: 类型] [= 默认值]`，调用前须 `check(TokenType.IDENTIFIER)`。
+     *
+     * 类型与默认值至少要写出一个：两者都不写就没有任何信息可以推断字段类型
+     * （`struct Point { x }` 报 [diag.miss-struct-field-type]），此时仍产出字段节点，
+     * 让后续阶段按「无类型无默认值」继续走，不额外制造级联报错。
+     *
+     * 默认值用 [assignStmt] 解析，因此 `+=` 这类复合赋值也会被解析出来——它不是合法的字段默认值，
+     * 这里只取 `=`（[TokenType.ASSIGN]）的形态，其它算符按「没有默认值」处理并报错。
+     */
+    private fun structField(): Stmt.Struct.StructField? {
+        val fieldName = consume(TokenType.IDENTIFIER) {
+            error(bundle.get("diag.miss-struct-field-name"))
+                .label(lookAhead(0))
+        } ?: return null
+        val ident = Expr.Identifier(fieldName)
+
+        val annotation = annotation(ident)
+        if (annotation is ErrorExpr) return Stmt.Struct.StructField(annotation.span, ident, null, null)
+        val type = annotation as? Expr.Annotation
+
+        var default: Expr? = null
+        val assign = assignStmt(ident)
+        if (assign != null) {
+            when (assign.operator.type) {
+                TokenType.ASSIGN -> default = assign.value
+                else -> {
+                    error(bundle.get("diag.struct-field-default-operator"))
+                        .label(assign.operator, "")
+                }
+            }
+        }
+
+        if (type == null && default == null) {
+            error(bundle.get("diag.miss-struct-field-type"))
+                .label(ident, bundle.get("diag.miss-struct-field-type.help"))
+        }
+
+        val end: Spanned = default ?: type ?: ident
+        return Stmt.Struct.StructField(between(fieldName, end), ident, type, default)
     }
 
     /**

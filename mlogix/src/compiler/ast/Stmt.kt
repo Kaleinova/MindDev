@@ -84,9 +84,34 @@ abstract class Stmt(span: Span) : ASTNode(span) {
         val name: Expr.Identifier,
         val typeParams: Seq<Expr.Identifier>?,
         /** 字段**声明** */
-        val fields: Seq<ASTNode>,
+        val fields: Seq<StructField>,
         val methods: Seq<Fn>
-    ) : Stmt(span)
+    ) : Stmt(span) {
+        /** 由 Resolver 填充：此结构体定义对应的 [DefId]（未声明/解析失败时为 null） */
+        var defId: DefId? = null
+
+        /**
+         * 结构体字段声明 `名字 [: 类型] [= 默认值]`。
+         *
+         * 三部分都可选性受约束（由 Parser 检查）：至少要写出类型或默认值之一——
+         * 两者都不写就没有任何信息可以推断字段类型。
+         *
+         * 默认值让字段在构造时**可省略**（`struct Point { x: Num = 0, y: Num = 0 }` 可写 `Point(1)`），
+         * 但默认值只在「该字段缺席」时参与检查，不能引用同结构体的其它字段
+         * （避免字段默认值之间形成依赖环，语义上要求默认值自成一体）。
+         */
+        data class StructField(
+            override val span: Span,
+            val name: Expr.Identifier,
+            /** 冒号后的类型注解；省略类型时为 null（类型由默认值推断） */
+            val type: Expr.Annotation?,
+            /** `= 默认值`；没有默认值时为 null（该字段构造时必须传入） */
+            val default: Expr?,
+        ) : ASTNode(span) {
+            /** 由 Resolver 填充：此字段对应的 [DefId] */
+            var defId: DefId? = null
+        }
+    }
 
     /**
      * 枚举声明（Rust 风格），变体用 `.` 访问：`Color.Red`、`Option.Some(1)`、`Shape.Rect(1.0, 2.0)`。

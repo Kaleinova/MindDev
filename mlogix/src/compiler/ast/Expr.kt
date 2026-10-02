@@ -25,6 +25,24 @@ abstract class Expr(span: Spanned) : ASTNode(span.span()) {
     }
 
     /**
+     * 隐式接收者 `self`：struct 方法体内省略不写，由编译器代管。
+     *
+     * 源码里写不出 `self`（它不是标识符、也不进作用域），因此它**不是** [Identifier]：
+     * 单独一个节点才能让「方法体的形参列表」与「方法调用的实参列表」按下标严格对齐，
+     * 也让类型系统能一眼认出「这个形参由调用点传入接收者」而不是「由实参传入」。
+     *
+     * 两种用法（都由 Resolver 填 [instanceDefId]）：
+     * - **形参标记**：方法声明的形参列表里代表接收者那一位（用户显式写的，或
+     *   TypeInferencer 在首位补齐的），类型永远是所属 struct；
+     * - **隐式字段接收者**：方法体里直接写字段名（`x`、`y`）时，字段引用被包成
+     *   `Get(SelfRef, 字段名)`，于是字段读取与 `self.x` 收敛到同一条推断路径。
+     */
+    data class SelfRef(override val span: Span) : Expr(span) {
+        /** 由 Resolver 填充：所属 struct 类型的定义句柄 */
+        var instanceDefId: DefId? = null
+    }
+
+    /**
      * 元组
      */
     data class Tuple(override val span: Span, val elements: Seq<Expr>) : Expr(span)
@@ -67,8 +85,13 @@ abstract class Expr(span: Spanned) : ASTNode(span.span()) {
 
     /**
      * 函数调用 func(...)
+     *
+     * [callee] 是 `var`：名称解析期要**就地**改写被调用者（方法体里裸写的方法名 →
+     * 隐式 `self.方法名`）。若改成新建 [Call] 节点，外层 AST 仍指向旧节点，
+     * 改写结果就传不到后续阶段（类型推断只看得到旧的裸标识符）。
+     * 与 `Stmt.Fn.params` 同理：解析期就地补/改，不重挂整棵树。
      */
-    data class Call(override val span: Span, val callee: Expr, val args: Seq<Expr>) :
+    data class Call(override val span: Span, var callee: Expr, val args: Seq<Expr>) :
         Expr(span)
 
     /**

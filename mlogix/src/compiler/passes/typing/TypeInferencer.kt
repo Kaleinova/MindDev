@@ -66,6 +66,12 @@ class TypeInferencer(val context: CompilerContext) {
     /** 枚举名 → 枚举符号（同文件）：穷尽性检查要按被匹配类型的名字反查变体表 */
     private val enumSymbols = ObjectMap<String, Symbol>()
 
+    /** 结构体名 → 结构体符号（同文件）：成员（字段/方法）访问要按接收者类型反查成员表 */
+    private val structSymbols = ObjectMap<String, Symbol>()
+
+    /** 结构体定义 → 它声明的类型参数变量（按声明顺序）：把成员类型里的 `T` 代入为访问点的类型实参 */
+    private val structTypeParamVars = ObjectMap<DefId, Seq<Type.Var>>()
+
     /** 本次 walk 收集到的 match 覆盖性检查输入（求解后统一检查） */
     private val matchCoverages = Seq<MatchCoverage>(4)
 
@@ -95,6 +101,8 @@ class TypeInferencer(val context: CompilerContext) {
         fnTypeParamVars.clear()
         declaredTypeParamNames.clear()
         enumSymbols.clear()
+        structSymbols.clear()
+        structTypeParamVars.clear()
         matchCoverages.clear()
 
         // walk AST and collect constraints
@@ -420,6 +428,10 @@ class TypeInferencer(val context: CompilerContext) {
                 analyzeEnumStmt(stmt)
             }
 
+            is Stmt.Struct -> {
+                analyzeStructStmt(stmt)
+            }
+
             else -> {
                 // unhandled statement kinds
             }
@@ -539,7 +551,10 @@ class TypeInferencer(val context: CompilerContext) {
         // 泛型函数：暂挂 scheme（供递归调用实例化），并登记到 genericFns，
         // 求解完成后统一重建为"已泛化的 scheme"（见 analyze() 末尾）。
         if (isGeneric) {
-            val quantified = mergeTypeVars(typeParamVars, signatureFreeVars(fnSymbol.type, typeParamVars))
+            val quantified = mergeTypeVars(
+                typeParamVars,
+                signatureFreeVars(fnSymbol.type, typeParamVars),
+            )
             fnSymbol.typeScheme = TypeScheme(quantified, fnSymbol.type)
             fnSymbol.values.put(Symbol.TYPE_PARAM_COUNT_KEY, typeParamVars.size)
             genericFns.add(GenericFnInfo(fnSymbol, typeParamVars, envFreeVars()))
@@ -635,6 +650,241 @@ class TypeInferencer(val context: CompilerContext) {
     }
 
     /**
+     * 结构体声明：登记结构体类型（`Con` / `App`）、构造器类型方案，并逐个字段建立类型。
+     *
+     * - **类型**：非泛型 `Point` → [Type.Con]；泛型 `Wrapper<T>` → [Type.App]（与泛型枚举一致）；
+     * - **字段类型**：有注解用注解类型；只有默认值时由默认值推断（`struct Point { x = 0 }`
+     *   的 `x` 是 `Int`）；两者都缺时 Parser 已报错，这里留 [BuiltinType.Error] 抑制级联；
+     * - **构造器**：`构造器类型 = (字段类型...) -> 结构体类型`，字段有默认值时该位可省略
+     *   （检查发生在调用点，见 [inferStructCall]）；类型方案量化声明的类型参数，
+     *   于是 `Wrapper(1)` 与 `Wrapper("s")` 各自实例化、互不污染（与泛型枚举同机制）；
+     * - **方法**：类型为 `(接收者, 形参...) -> 结果`（接收者由 Resolver 放在形参首位），
+     *   类型方案量化结构体声明的类型参数 + 方法自己的类型参数，调用点实例化。
+     */
+    private fun analyzeStructStmt(stmt: Stmt.Struct) {
+        val structSymbol = stmt.defId?.let { symbolTable.get(it) } ?: return
+
+        // 泛型形参：每个类型参数分配 fresh 变量并写入类型参数符号（与泛型枚举一致）。
+        // 字段类型注解里的 `T` 经符号查得该变量，因此字段类型天然带 T。
+        val typeParams = stmt.typeParams
+        val typeParamVars = Seq<Type.Var>(typeParams?.size ?: 0)
+        if (typeParams != null) {
+            declaredTypeParamNames.put(structSymbol.id, typeParamNamesOf(typeParams))
+            for (typeParam in typeParams) {
+                val v = solver.freshVar()
+                typeParamVars.add(v)
+                varDeclSpans.put(v.index, typeParam.span)
+                typeParam.defId?.let { defId ->
+                    symbolTable.get(defId)?.let { paramSymbol -> paramSymbol.type = v }
+                }
+            }
+        }
+        structTypeParamVars.put(structSymbol.id, typeParamVars)
+
+        val structType: Type = if (typeParamVars.isEmpty) {
+            Type.Con(structSymbol.name)
+        } else {
+            val args = Seq<Type>(typeParamVars.size)
+            for (v in typeParamVars) args.add(v)
+            Type.App(Type.Con(structSymbol.name), args)
+        }
+        structSymbol.type = structType
+        structSymbols.put(structSymbol.name, structSymbol)
+
+        // 字段：声明信息（名字/DefId/位置/来源）由 Resolver 备好，这里只填类型
+        val declaredTable = structSymbol.values.get(Symbol.STRUCT_FIELD_TABLE_KEY) as? StructFieldTable
+        val fieldTypes = Seq<Type>(stmt.fields.size)
+        val fieldDefaults = Seq<Expr?>(stmt.fields.size)
+        val fieldSpans = Seq<Span>(stmt.fields.size)
+        val fieldOrigins = Seq<TypeOrigin>(stmt.fields.size)
+        for (field in stmt.fields) {
+            val (fieldType, fieldOrigin) = analyzeStructField(field)
+            fieldTypes.add(fieldType)
+            fieldDefaults.add(field.default)
+            fieldSpans.add(field.name.span)
+            fieldOrigins.add(fieldOrigin)
+            field.defId?.let { defId -> symbolTable.get(defId)?.let { it.type = fieldType } }
+        }
+        structSymbol.values.put(
+            Symbol.STRUCT_FIELD_TABLE_KEY,
+            StructFieldTable(
+                declaredTable?.names ?: Seq(0),
+                declaredTable?.defIds ?: Seq(0),
+                fieldSpans,
+                fieldOrigins,
+            ),
+        )
+        structSymbol.values.put(Symbol.STRUCT_FIELD_TYPES_KEY, StructFieldTypes(fieldTypes, fieldDefaults))
+
+        val constructorType: Type =
+            if (fieldTypes.isEmpty) structType else Type.Func(fieldTypes, structType)
+        structSymbol.typeScheme = TypeScheme(typeParamVars, constructorType)
+        // 类型方案按调用点实例化：声明了几个类型参数就量化几个
+        // （`Wrapper(1)` / `Wrapper("s")` 各自实例化，互不污染）
+        structSymbol.values.put(Symbol.TYPE_PARAM_COUNT_KEY, typeParamVars.size)
+        // 构造器标记：值位置读结构体名时构造器（`set f = Point` 的 `f` 是函数），
+        // 而不是结构体本身。**不能**只看类型方案是否量化了变量——非泛型结构体的方案
+        // 也可能量化（字段类型含结构体自己声明的 `T` 时），那会把结构体名误判成函数值
+        structSymbol.values.put(Symbol.STRUCT_CONSTRUCTOR_KEY, true)
+
+        // 方法：左值（符号）已由 Resolver 登记，这里补类型方案与函数体检查
+        for (method in stmt.methods) analyzeStructFnStmt(method, structSymbol, typeParamVars)
+    }
+
+    /**
+     * 单个字段的类型与来源：有类型注解用注解类型，否则由默认值推断（[TypeSolver.freshVar] + 与默认值相等）。
+     *
+     * 两者都缺时 Parser 已报「字段需要类型或默认值」，这里返回 [BuiltinType.Error] 抑制级联。
+     */
+    private fun analyzeStructField(field: Stmt.Struct.StructField): Pair<Type, TypeOrigin> {
+        field.type?.let { return annotationToType(it) to annotationToOrigin(it) }
+        val default = field.default
+            ?: return BuiltinType.Error to TypeOrigin(field.name.span)
+        // 只有默认值：字段类型 = 推断出的默认值类型；把默认值记录为该推断出来的类型
+        val variable = solver.freshVar()
+        val inferred = inferExpr(default, ExpectedType(variable, TypeOrigin(field.name.span)))
+        constraints.addAll(inferred.constraints)
+        registerVarSpan(variable, field.name.span)
+        return variable to TypeOrigin(field.name.span)
+    }
+
+    /**
+     * 方法声明：在 [analyzeFnStmt] 的常规函数检查之外，额外把接收者（形参首位）的类型定为
+     * 所属结构体类型，并把方法类型方案量化「结构体类型参数 + 方法自己的类型参数」。
+     *
+     * 与普通函数共用一套检查（形参/返回值/函数体），差别只有三点：
+     * - 接收者形参的类型恒为结构体类型（`Point` / `Wrapper<T>`），而不是形状参注解；
+     * - 方法体内**直接写字段名**由 Resolver 改写成 `self.字段名`，走同一条成员访问路径；
+     * - 方法符号先压栈登记到泛型表，求解后重建类型方案（与泛型函数一致）。
+     */
+    private fun analyzeStructFnStmt(
+        method: Stmt.Fn,
+        structSymbol: Symbol,
+        structTypeParams: Seq<Type.Var>,
+    ) {
+        val params = method.params
+        val selfParam = params?.firstNotNullOfOrNull { unwrapSelfRef(it) }
+        // 接收者的形状与结构体一致，但**实测调用点**要拿到独立的类型实参，故用「该结构体的
+        // 类型参数变量」（而不是 Struct App 本身），调用点对接收者做结构合一即可代入
+        val selfType: Type = if (structTypeParams.isEmpty) {
+            Type.Con(structSymbol.name)
+        } else {
+            val args = Seq<Type>(structTypeParams.size)
+            args.addAll(structTypeParams)
+            Type.App(Type.Con(structSymbol.name), args)
+        }
+        selfParam?.let { it.instanceDefId = structSymbol.id }
+
+        // 声明类型参数名（note 指向声明处）：方法自己声明的类型参数
+        val methodTypeParams = method.typeParams
+        val methodTypeParamVars = Seq<Type.Var>(methodTypeParams?.size ?: 0)
+        if (methodTypeParams != null) {
+            for (typeParam in methodTypeParams) {
+                val v = solver.freshVar()
+                methodTypeParamVars.add(v)
+                varDeclSpans.put(v.index, typeParam.span)
+                typeParam.defId?.let { defId ->
+                    symbolTable.get(defId)?.let { paramSymbol -> paramSymbol.type = v }
+                }
+            }
+        }
+
+        val methodSymbol = method.defId?.let { symbolTable.get(it) }
+        if (methodSymbol == null) {
+            // 解析失败（如方法名重复）：仍分析函数体，避免漏报体内错误
+            analyzeStmt(method.body)
+            return
+        }
+        // 类型参数：结构体的 + 方法自己的，方法签名与函数体都能引用
+        val allTypeParamVars = Seq<Type.Var>(structTypeParams.size + methodTypeParamVars.size)
+        allTypeParamVars.addAll(structTypeParams)
+        allTypeParamVars.addAll(methodTypeParamVars)
+
+        // 形参类型：接收者位用 selfType，其余按注解转换（与 analyzeFnStmt 同一套规则）
+        val paramTypes = Seq<Type>(8)
+        val paramDeclInfo = Seq<TypeAnnotation>(params?.size ?: 0)
+        val isGeneric = !allTypeParamVars.isEmpty
+        params?.let { paramList ->
+            for (p in paramList) {
+                val selfRef = unwrapSelfRef(p)
+                if (selfRef != null) {
+                    paramTypes.add(selfType)
+                    paramDeclInfo.add(TypeAnnotation(selfType, TypeOrigin(p.span)))
+                    continue
+                }
+                if (p is Expr.Annotation) {
+                    val declType = annotationToType(p)
+                    paramDeclInfo.add(TypeAnnotation(declType, annotationToOrigin(p)))
+                    if (isGeneric) {
+                        paramTypes.add(declType)
+                        registerVarSpan(declType, p.span)
+                    } else {
+                        val tv = solver.freshVar()
+                        paramTypes.add(tv)
+                        val useSpan = unwrapIdentifier(p)?.span ?: p.span
+                        varDeclSpans.put(tv.index, p.span)
+                        constraints.add(Constraint.Equal(tv, declType, useSpan, p.span))
+                    }
+                } else {
+                    paramTypes.add(solver.freshVar())
+                    paramDeclInfo.add(TypeAnnotation.None)
+                }
+            }
+        }
+        if (!paramDeclInfo.isEmpty) paramDecls.put(methodSymbol.id, paramDeclInfo)
+
+        // 返回值类型：与 analyzeFnStmt 同规则（单一返回值注解 → 注解类型 / Equal 约束）
+        var resultType: Type = solver.freshVar()
+        var resultOrigin: TypeOrigin? = null
+        var resultPush: ExpectedType? = null
+        var resultDeclSpan: Span = method.name?.span ?: method.span
+        method.results?.let { results ->
+            if (results.size == 1) {
+                val result = results[0]
+                if (result is Expr.Annotation) {
+                    val declType = annotationToType(result)
+                    resultOrigin = annotationToOrigin(result)
+                    resultDeclSpan = result.span
+                    if (!isGeneric || !mentionsAnyVar(declType, allTypeParamVars)) {
+                        resultPush = ExpectedType(declType, resultOrigin)
+                    }
+                    if (isGeneric) {
+                        resultType = declType
+                        registerVarSpan(declType, result.span)
+                    } else {
+                        constraints.add(Constraint.Equal(resultType, declType, result.span, result.span))
+                    }
+                }
+            }
+        }
+
+        methodSymbol.type = Type.Func(paramTypes, resultType)
+        if (isGeneric) {
+            val quantified = mergeTypeVars(
+                allTypeParamVars,
+                signatureFreeVars(methodSymbol.type, allTypeParamVars),
+            )
+            methodSymbol.typeScheme = TypeScheme(quantified, methodSymbol.type)
+            methodSymbol.values.put(Symbol.TYPE_PARAM_COUNT_KEY, methodTypeParamVars.size)
+            genericFns.add(GenericFnInfo(methodSymbol, allTypeParamVars, envFreeVars()))
+            typeParamStack.add(allTypeParamVars)
+        }
+
+        returnContextStack.add(ReturnContext(resultType, resultDeclSpan, resultOrigin, resultPush))
+        params?.let { paramList ->
+            for ((i, p) in paramList.withIndex()) {
+                val ident = unwrapIdentifier(p)
+                ident?.defId?.let { defId ->
+                    symbolTable.get(defId)?.let { paramSymbol -> paramSymbol.type = paramTypes.get(i) }
+                }
+            }
+        }
+        analyzeStmt(method.body)
+        returnContextStack.pop()
+        if (isGeneric) typeParamStack.pop()
+    }
+
+    /**
      * 标识符推断（不含期望类型消费；消费由 [inferExpr] 统一包装）。
      *
      * 变量的来源就是它的使用位置：作为「使用方」下钻到最里层时，label 指向这里的引用。
@@ -659,6 +909,24 @@ class TypeInferencer(val context: CompilerContext) {
             error(bundle.format("diag.enum-as-value", symbol.name))
                 .label(expr, bundle.format("diag.enum-as-value.help", symbol.name))
             return InferResult(BuiltinType.Error, Seq(0), origin)
+        }
+        if (symbol.values.get(Symbol.STRUCT_CONSTRUCTOR_KEY) == true) {
+            // 结构体名在值位置是**构造器**：`set f = Point` 得到函数值，`Point(1.0, 2.0)` 得到实例。
+            // 每个访问点独立实例化：`Wrapper(1)` 与 `Wrapper("s")` 互不污染。
+            //
+            // 无字段结构体（`struct None`）的构造器是**常量**（结果类型就是它自己），
+            // 允许它当值等于允许把类型名当值用（`set p = None` 与 `set p : None = None` 都成立），
+            // 也就绕过了「构造必须显式写出来」的一致性——故这里报错，要求写 `None()`
+            if (structFieldTypesOf(symbol).count == 0) {
+                error(bundle.format("diag.struct-unit-as-value", symbol.name))
+                    .label(expr, bundle.format("diag.struct-unit-as-value.help", symbol.name))
+                return InferResult(BuiltinType.Error, Seq(0), origin)
+            }
+            return InferResult(
+                symbol.typeScheme.instantiateWith(Seq(0)) { solver.freshVar() },
+                Seq(0),
+                origin,
+            )
         }
         // 泛型函数（或值位置携带显式类型实参）：按调用点实例化类型方案，
         // 每次引用得到独立的类型变量（多态）。
@@ -746,6 +1014,7 @@ class TypeInferencer(val context: CompilerContext) {
     private fun variantFieldToType(field: Expr): Type = when (field) {
         is Expr.Annotation -> annotationToType(field)
         is Expr.Identifier -> typeArgToType(field)
+
         is Expr.Tuple -> {
             val elements = Seq<Type>(field.elements.size)
             for (element in field.elements) elements.add(variantFieldToType(element))
@@ -862,6 +1131,453 @@ class TypeInferencer(val context: CompilerContext) {
         diagnostic
             .note(bundle.format("diag.explicit-type-arg-count.note", owner.name, declaredCount, namesText))
             .label(owner.span, "")
+    }
+
+    // ========== 结构体成员（构造 / 字段 / 方法） ==========
+
+    /** 结构体符号的「自我类型」：`Point` 或 `Wrapper<T>`（T 是它声明的类型参数变量） */
+    private fun selfTypeOf(structSymbol: Symbol): Type {
+        val typeParams = structTypeParamVars.get(structSymbol.id)
+        if (typeParams == null || typeParams.isEmpty) return Type.Con(structSymbol.name)
+        val args = Seq<Type>(typeParams.size)
+        args.addAll(typeParams)
+        return Type.App(Type.Con(structSymbol.name), args)
+    }
+
+    /**
+     * 若 [callee] 是「结构体类型名」标识符（`Point(...)`、`None()`、`Wrapper<Int>(...)`），
+     * 返回该结构体符号。
+     *
+     * 无字段结构体（`struct None`）同样有构造器：`None()` 是零实参构造，产出该结构体的值。
+     */
+    private fun structConstructorOf(callee: Expr?): Symbol? {
+        val ident = callee as? Expr.Identifier ?: return null
+        val symbol = ident.defId?.let { symbolTable.get(it) } ?: return null
+        if (symbol.values.get(Symbol.STRUCT_KEY) != true) return null
+        return symbol
+    }
+
+    /**
+     * 具名类型（`App(Con(N), args)` / `Con(N)`）的类型名；不是具名类型时返回 null。
+     */
+    private fun typeNameOf(type: Type): String? = when (type) {
+        is Type.App -> type.con.name
+        is Type.Con -> type.name
+        else -> null
+    }
+
+    /** 具名类型实参（`Wrapper<Int>` 的 `[Int]`）；非 `App` 时为空 */
+    private fun typeArgsOf(type: Type): Seq<Type> = (type as? Type.App)?.args ?: Seq(0)
+
+    /**
+     * 把结构体成员类型里的类型参数代入为 [structTypeName] 这个具体类型实例的类型实参。
+     *
+     * `Wrapper<Int>` 的成员 `v: T` → `Int`；非泛型结构体（没有类型参数）原样返回。
+     */
+    private fun substituteStructMember(
+        structTypeName: String,
+        memberType: Type,
+        structType: Type,
+    ): Type {
+        val structSymbol = structSymbols.get(structTypeName) ?: return memberType
+        val declaredParams = structTypeParamVars.get(structSymbol.id)
+        if (declaredParams == null || declaredParams.isEmpty) return memberType
+        val actualArgs = typeArgsOf(structType)
+        val substitution = ObjectMap<Int, Type>()
+        for ((i, param) in declaredParams.withIndex()) {
+            substitution.put(param.index, if (i < actualArgs.size) actualArgs.get(i) else solver.freshVar())
+        }
+        return substituteTypeVars(memberType, substitution)
+    }
+
+    /** 按「类型变量索引 → 类型」的映射做**直接**替换（不展开已绑定的变量，只替换字面出现的变量） */
+    private fun substituteTypeVars(type: Type, substitution: ObjectMap<Int, Type>): Type = when (type) {
+        is Type.Var -> substitution.get(type.index) ?: type
+        is Type.Con -> type
+
+        is Type.Func -> {
+            val params = Seq<Type>(type.params.size)
+            for (param in type.params) params.add(substituteTypeVars(param, substitution))
+            Type.Func(params, substituteTypeVars(type.result, substitution))
+        }
+
+        is Type.Arr -> Type.Arr(substituteTypeVars(type.element, substitution))
+
+        is Type.App -> {
+            val args = Seq<Type>(type.args.size)
+            for (arg in type.args) args.add(substituteTypeVars(arg, substitution))
+            Type.App(type.con, args)
+        }
+
+        is Type.TupleType -> {
+            val elements = Seq<Type>(type.elements.size)
+            for (element in type.elements) elements.add(substituteTypeVars(element, substitution))
+            Type.TupleType(elements)
+        }
+
+        Type.Unknown, Type.Error -> type
+    }
+
+    /** 结构体的字段类型与默认值（按声明顺序）；不是已分析的结构体时为空表 */
+    private fun structFieldTypesOf(structSymbol: Symbol): StructFieldTypes {
+        return structSymbol.values.get(Symbol.STRUCT_FIELD_TYPES_KEY) as? StructFieldTypes
+            ?: StructFieldTypes(Seq(0), Seq(0))
+    }
+
+    /**
+     * 成员符号（字段 / 方法）是否是**实例成员**访问（`p.x`、`p.dist`）。
+     *
+     * 判定只依赖「成员符号带结构体成员标记」——Resolver 只会在「左侧是值」或方法体内隐式接收者
+     * 这两种情况下填这种 DefId；类型名上的成员（`Point.x`）已在 Resolver 报错。
+     */
+    private fun instanceMemberOf(memberExpr: Expr?): Symbol? {
+        val fieldIdent = ((memberExpr as? Expr.Get)?.field as? Expr.Identifier) ?: return null
+        val defId = fieldIdent.defId ?: return null
+        // 已按接收者类型查过、确认不是成员：不再当成员，也不再重查（见 [resolveInstanceMember]）
+        if (defId == ALREADY_RESOLVED_MEMBER) return null
+        val symbol = symbolTable.get(defId) ?: return null
+        val isMember = symbol.values.get(Symbol.STRUCT_FIELD_KEY) == true ||
+                symbol.values.get(Symbol.STRUCT_METHOD_KEY) == true
+        return if (isMember) symbol else null
+    }
+
+    /** 若 [callee] 是实例方法（`p.dist`），返回该方法符号；字段或非成员返回 null */
+    private fun instanceMethodOf(callee: Expr?): Symbol? {
+        val member = instanceMemberOf(callee) ?: return null
+        return if (member.values.get(Symbol.STRUCT_METHOD_KEY) == true) member else null
+    }
+
+    /**
+     * 接收者类型未知（嵌套成员访问 `a.b.c` 的里层没被 Resolver 解析）时，按**接收者类型**补解析成员：
+     * 接收者是结构体实例就在它的成员表里查，查不到报「没有这个成员」。
+     *
+     * @return 解析出的成员符号；无法解析（接收者不是结构体 / 成员不存在）时返回 null
+     */
+    private fun resolveInstanceMember(get: Expr.Get): Symbol? {
+        val memberIdent = get.field as? Expr.Identifier ?: return null
+        // 已经查过一次（含「不是成员」的负标记）：不重查、不重复报错
+        if (memberIdent.defId != null) return null
+        val memberName = identifierNameOf(memberIdent)
+        val objectType = solver.read(inferExpr(get.obj).type)
+        val structSymbol = structSymbols.get(typeNameOf(objectType) ?: return null)
+        if (structSymbol == null) {
+            // 接收者不是结构体实例（`1.0 .x`、`"s".get()`）：成员不可能存在。
+            // 类型变量/错误类型下静默（还没解出来或已经报过错，避免级联）
+            if (objectType !is Type.Var && objectType !is Type.Error && objectType !is Type.Unknown) {
+                error(bundle.format("diag.member-on-non-struct", memberName, objectType.pretty()))
+                    .label(memberIdent, bundle.get("diag.member-on-non-struct.help"))
+                memberIdent.defId = ALREADY_RESOLVED_MEMBER
+            }
+            return null
+        }
+        val fields = structSymbol.values.get(Symbol.STRUCT_FIELDS_KEY) as? StructFields
+        val methods = structSymbol.values.get(Symbol.STRUCT_METHODS_KEY) as? StructMethods
+        val memberDefId = fields?.get(memberName) ?: methods?.get(memberName)
+        if (memberDefId != null) {
+            memberIdent.defId = memberDefId
+            return symbolTable.get(memberDefId)
+        }
+        error(bundle.format("diag.no-such-member", structSymbol.name, memberName))
+            .label(
+                memberIdent,
+                bundle.format("diag.no-such-member.help", structSymbol.name, memberNamesText(fields, methods)),
+            )
+        // 标记「已按接收者类型查过」：同一节点可能被推断两次（如方法调用先解析被调用者、
+        // 再推断整条调用），打上「非成员」的负标记后第二次不再重复报错
+        memberIdent.defId = ALREADY_RESOLVED_MEMBER
+        return null
+    }
+
+    /** 「已按接收者类型查过、但不是任何结构体成员」的负标记（见 [resolveInstanceMember]） */
+    private val ALREADY_RESOLVED_MEMBER = DefId(-1)
+
+    /** 结构体全部成员名（字段在前、方法在后），用于「没有这个成员」的诊断 */
+    private fun memberNamesText(fields: StructFields?, methods: StructMethods?): String {
+        val names = Seq<String>((fields?.names()?.size ?: 0) + (methods?.names()?.size ?: 0))
+        fields?.names()?.let { names.addAll(it) }
+        methods?.names()?.let { names.addAll(it) }
+        return names.toString(", ")
+    }
+
+    /**
+     * 字段读取（`p.x`）/ 方法引用（`p.dist` 作函数值）的类型。
+     *
+     * 字段：接收者类型必须是同名结构体实例（`p: Point`），字段类型按接收者的类型实参代入
+     * （`Wrapper<Int>` 的 `v` 是 `Int`）。接收者类型不是该结构体（如 `1 .x`）时报
+     * [diag.member-on-non-struct]——这类错误 Resolver 看不出来（它不知道值的类型）。
+     */
+    /**
+     * `枚举名.变体(实参...)`：按变体载荷检查实参并产出枚举类型。
+     * `结构体名(实参...)`：按字段检查实参并产出结构体类型。
+     *
+     * 规则（与用户确认过的语义一致）：
+     * - 实参按字段**声明顺序**位置对应，不能具名、不能乱序；
+     * - 有默认值的字段可省略，且省略只能发生在尾部（`Point(1)`：x=1、y 用默认值）；
+     * - 无默认值的字段必须写出来，缺了报 [diag.struct-missing-field]；
+     * - 实参数量超过字段数报 [diag.struct-field-count]；
+     * - 双向检查：期望类型与本结构体同类（`Wrapper<Int>` 对 `Wrapper(...)`）时采用期望类型，
+     *   并把期望的类型实参下推到对应字段实参，于是错误就地报在出错的那个实参上。
+     */
+    private fun inferStructCall(
+        call: Expr.Call,
+        structSymbol: Symbol,
+        expected: ExpectedType?,
+    ): InferResult {
+        val explicitArgs = (call.callee as? Expr.Identifier)?.typeArgs
+        val constructorType = instantiateScheme(
+            structSymbol,
+            call.callee as Expr.Identifier,
+            structSymbol.values.get(Symbol.TYPE_PARAM_COUNT_KEY) as? Int ?: 0,
+        )
+        val parameterTypes = (constructorType as? Type.Func)?.params ?: Seq(0)
+        val structType = (constructorType as? Type.Func)?.result ?: constructorType
+        val fieldInfo = structFieldTypesOf(structSymbol)
+        val fieldTypes = fieldInfo.types
+        val fieldTable = structSymbol.values.get(Symbol.STRUCT_FIELD_TABLE_KEY) as? StructFieldTable
+
+        val structApp = structType as? Type.App
+        val expectedApp = expected?.type as? Type.App
+        val adoptedTypeArgs: Seq<Type>? =
+            if (structApp != null && expectedApp != null &&
+                expectedApp.con == structApp.con && expectedApp.args.size == structApp.args.size
+            ) {
+                expectedApp.args
+            } else {
+                null
+            }
+        val resultType = adoptedTypeArgs?.let { expected?.type ?: structType } ?: structType
+
+        val combined = Seq<Constraint>(0)
+        if (call.args.size > fieldTypes.size) {
+            error(bundle.format("diag.struct-field-count", structSymbol.name, fieldTypes.size, call.args.size))
+                .label(call, bundle.format("diag.struct-fields", structSymbol.name, fieldTable?.namesText() ?: ""))
+        }
+        // 缺字段：只有「无默认值」的字段必须写出来；有默认值的字段可按尾部省略
+        var missingReported = false
+        for (i in 0 until fieldInfo.count) {
+            if (i >= call.args.size && fieldInfo.defaultAt(i) == null) {
+                if (!missingReported) {
+                    error(
+                        bundle.format(
+                            "diag.struct-missing-field",
+                            structSymbol.name,
+                            fieldTable?.names?.get(i) ?: "",
+                        )
+                    ).label(
+                        call,
+                        bundle.format(
+                            "diag.struct-fields",
+                            structSymbol.name,
+                            fieldTable?.namesText() ?: "",
+                        ),
+                    )
+                    missingReported = true
+                }
+            }
+        }
+
+        val argOrigins = Seq<TypeOrigin>(call.args.size)
+        for ((i, arg) in call.args.withIndex()) {
+            val declaredType = if (i < parameterTypes.size) parameterTypes.get(i) else BuiltinType.Error
+            val fieldIndex = if (i < fieldTypes.size) i else -1
+            val pushed = if (adoptedTypeArgs != null && structApp != null && fieldIndex >= 0) {
+                directPayloadExpectation(fieldTypes, fieldIndex, structApp.args, adoptedTypeArgs, expected?.origin)
+            } else {
+                null
+            }
+            val r = inferExpr(arg, pushed)
+            combined.addAll(r.constraints)
+            argOrigins.add(r.origin ?: TypeOrigin.Unknown)
+            if (i < parameterTypes.size && !r.expectedHandled) {
+                val declType = pushed?.type ?: declaredType
+                val declSpan = pushed?.span ?: fieldTable?.spanOf(i)
+                val declOrigin = pushed?.origin ?: fieldTable?.originAt(i)
+                combined.add(Constraint.Equal(r.type, declType, arg.span, declSpan, r.origin, declOrigin))
+            }
+        }
+
+        // 采用期望类型后，结构体自身的类型实参也要与期望对齐（漏报了这一段会漏掉
+        // 「期望 `Wrapper<Int>`、构造时没传 Int」这类错误）
+        if (adoptedTypeArgs != null && structApp != null) {
+            for ((j, typeArg) in structApp.args.withIndex()) {
+                val expectedOrigin = expected?.origin?.childAt(j)
+                combined.add(
+                    Constraint.Equal(
+                        typeArg,
+                        adoptedTypeArgs.get(j),
+                        call.span,
+                        expectedOrigin?.span,
+                        null,
+                        expectedOrigin,
+                    )
+                )
+            }
+        }
+
+        return InferResult(
+            resultType,
+            combined,
+            structCallOrigin(structType, fieldTypes, call, argOrigins),
+            adoptedTypeArgs != null,
+        )
+    }
+
+    /**
+     * 构造结果的来源树：把「结构体类型实参」映射回写出它的那个字段实参
+     * （与 [enumCallOrigin] 同构，见其注释）。
+     */
+    private fun structCallOrigin(
+        structType: Type,
+        fieldTypes: Seq<Type>,
+        call: Expr.Call,
+        argOrigins: Seq<TypeOrigin>,
+    ): TypeOrigin {
+        val typeArgs = (structType as? Type.App)?.args ?: return TypeOrigin(call.span)
+        val children = Seq<TypeOrigin>(typeArgs.size)
+        for (typeArg in typeArgs) {
+            var child = TypeOrigin.Unknown
+            for ((i, fieldType) in fieldTypes.withIndex()) {
+                if (fieldType == typeArg && i < argOrigins.size) {
+                    child = argOrigins.get(i)
+                    break
+                }
+            }
+            children.add(child)
+        }
+        return TypeOrigin(call.span, children)
+    }
+
+    /**
+     * 字段读取（`p.x`）/ 方法引用（`set f = p.dist`）的类型。
+     *
+     * 字段：接收者类型必须是同名结构体实例（`p: Point`），字段类型按接收者的类型实参代入
+     * （`Wrapper<Int>` 的 `v` 是 `Int`）。接收者类型不是该结构体（如 `1 .x`）时报
+     * [diag.member-on-non-struct]——这类错误 Resolver 看不出来（它不知道值的类型）。
+     *
+     * 方法引用：类型为 `(接收者, 形参...) -> 结果`，接收者位按访问点的实际类型代入。
+     */
+    private fun inferInstanceMember(get: Expr.Get, member: Symbol): InferResult {
+        val objectResult = inferExpr(get.obj)
+        val combined = Seq<Constraint>(objectResult.constraints.size + 1)
+        combined.addAll(objectResult.constraints)
+        val objectType = solver.read(objectResult.type)
+        val isStructInstance = structSymbols.get(typeNameOf(objectType) ?: "") != null
+
+        if (member.values.get(Symbol.STRUCT_METHOD_KEY) == true) {
+            return InferResult(methodReferenceType(member, objectType), combined)
+        }
+        if (!isStructInstance) {
+            error(bundle.format("diag.member-on-non-struct", member.name, objectType.pretty()))
+                .label(get.field, bundle.get("diag.member-on-non-struct.help"))
+            return InferResult(BuiltinType.Error, combined)
+        }
+        val fieldType = substituteStructMember(typeNameOf(objectType)!!, member.type, objectType)
+        return InferResult(fieldType, combined)
+    }
+
+    /**
+     * `接收者.方法(实参...)`：按方法签名 `(接收者, 形参...) -> 结果` 检查实参。
+     *
+     * 与普通调用不同：接收者位由调用点提供（不是普通实参），因此
+     * - 接收者类型直接代入签名首位（不再单独加一条「接收者 = self 型」的约束：
+     *   结构合一会在类型不符时给出同样的「类型不匹配」，且不会把结构体的类型参数
+     *   跨调用点绑死，见 [methodSignatureFor]）；
+     * - 实参数 = 方法形参数 - 1，数量不符报 [diag.struct-method-arg-count]；
+     * - 方法自己声明的类型实参（`p.get<Int>()`）写在**成员名**上（Resolver 挂在 field 标识符上）。
+     */
+    private fun inferInstanceMethodCall(
+        call: Expr.Call,
+        memberGet: Expr.Get,
+        member: Symbol,
+        expected: ExpectedType?,
+    ): InferResult {
+        val objectResult = inferExpr(memberGet.obj)
+        val combined = Seq<Constraint>(objectResult.constraints.size + 8)
+        combined.addAll(objectResult.constraints)
+
+        val structSymbol = member.values.get(Symbol.STRUCT_METHOD_OWNER_KEY) as? Symbol
+            ?: return InferResult(BuiltinType.Error, combined)
+
+        val explicitArgs = (memberGet.field as? Expr.Identifier)?.typeArgs
+        if (explicitArgs != null && !explicitArgs.isEmpty) {
+            error(bundle.get("diag.method-type-args-not-supported"))
+                .label(memberGet.field, "")
+        }
+        val methodType = methodSignatureFor(member, solver.read(objectResult.type))
+        val signatureParams = (methodType as? Type.Func)?.params ?: Seq(0)
+        val resultType = (methodType as? Type.Func)?.result ?: methodType
+        // 形参里首位是接收者，实际实参数 = 形参数 - 1。方法写成 `fn m { }`（连括号都没有）时
+        // 签名里没有接收者位，这里按「没有可传的实参」处理，避免报出 -1 个实参这种数字
+        val declaredArgCount = maxOf(signatureParams.size - 1, 0)
+
+        if (declaredArgCount != call.args.size) {
+            error(
+                bundle.format(
+                    "diag.struct-method-arg-count",
+                    member.name,
+                    declaredArgCount,
+                    call.args.size,
+                )
+            ).label(call, "")
+        }
+
+        val memberDecls = paramDecls.get(member.id)
+        for ((i, arg) in call.args.withIndex()) {
+            val paramIndex = i + 1
+            val declared = memberDecls?.let { if (paramIndex < it.size) it.get(paramIndex) else null }
+            val pushed = pushableExpected(declared, member.id)
+            val r = inferExpr(arg, pushed)
+            combined.addAll(r.constraints)
+            if (paramIndex < signatureParams.size && !r.expectedHandled) {
+                val declType = pushed?.type ?: signatureParams.get(paramIndex)
+                val declSpan = memberDecls?.let { if (paramIndex < it.size) it.get(paramIndex).origin?.span else null }
+                combined.add(
+                    Constraint.Equal(r.type, declType, arg.span, declSpan ?: member.span, r.origin, pushed?.origin)
+                )
+            }
+        }
+
+        return InferResult(resultType, combined)
+    }
+
+    /**
+     * 方法**引用**（`set g = p.get`）的类型：接收者已绑定在 `p` 上，
+     * 所以签名里去掉了接收者位（`() -> Num`，而不是 `(Point) -> Num`），
+     * 之后 `g()` 就是一次普通的零实参调用。
+     */
+    private fun methodReferenceType(member: Symbol, objectType: Type): Type {
+        val signature = methodSignatureFor(member, objectType)
+        if (signature !is Type.Func) return signature
+        if (signature.params.isEmpty) return signature
+        val params = Seq<Type>(signature.params.size - 1)
+        for (i in 1 until signature.params.size) params.add(signature.params.get(i))
+        return Type.Func(params, signature.result)
+    }
+
+    /**
+     * 方法在**某个接收者类型**上的签名 `(接收者类型, 形参...) -> 结果`。
+     *
+     * 结构体声明的类型参数（`Wrapper<T>` 的 `T`）按接收者的类型实参代入
+     * （`w: Wrapper<Num>` → 方法签名的 `T` 全部是 `Num`），方法**自己**声明的类型参数
+     * 则每次实例化为 fresh 变量。
+     *
+     * 这里**不**把接收者与「结构体自我类型」加约束合一：那会把结构体的类型参数变量绑死，
+     * 使第一次访问点（`w: Wrapper<Num>`）决定后续所有访问点的类型实参。
+     * 改为直接把接收者的实际类型放进签名首位，由调用处的结构合一按次检查类型。
+     */
+    private fun methodSignatureFor(member: Symbol, objectType: Type): Type {
+        val structSymbol = member.values.get(Symbol.STRUCT_METHOD_OWNER_KEY) as? Symbol ?: return member.type
+        // 用符号当前类型（`(self, 形参...) -> 结果`，[analyzeStructFnStmt] 写入）而不是 typeScheme.body：
+        // 非泛型方法的类型方案是声明处的占位（Resolver 挂的 `Fn`），不是可用的签名
+        val substituted = substituteStructMember(structSymbol.name, member.type, objectType)
+        if (substituted !is Type.Func) return substituted
+        if (substituted.params.isEmpty) return substituted
+        val replaced = Seq<Type>(substituted.params.size)
+        replaced.add(objectType)
+        for (i in 1 until substituted.params.size) replaced.add(substituted.params.get(i))
+        // 方法自己声明的类型参数已在 [analyzeStructFnStmt] 里作为自由变量留在签名中，
+        // 调用点每次访问都重新按接收者代入一次，互不共享
+        return Type.Func(replaced, substituted.result)
     }
 
     /**
@@ -1055,6 +1771,16 @@ class TypeInferencer(val context: CompilerContext) {
                 if (expected == null) result else withExpectedCheck(result, expected, expr.span)
             }
 
+            is Expr.SelfRef -> {
+                // 隐式接收者：方法体内由 Resolver 构造，类型恒为方法所属结构体
+                val symbol = expr.instanceDefId?.let { symbolTable.get(it) }
+                if (symbol == null) {
+                    InferResult(BuiltinType.Error, Seq(0), TypeOrigin(expr.span))
+                } else {
+                    InferResult(selfTypeOf(symbol), Seq(0), TypeOrigin(expr.span))
+                }
+            }
+
             is Expr.Tuple -> {
                 // 元组：逐元素推断，产出 Type.TupleType；子项来源按下标对齐（元组元素失配时能指向具体元素）
                 val combined = Seq<Constraint>(0)
@@ -1153,9 +1879,22 @@ class TypeInferencer(val context: CompilerContext) {
             }
 
             is Expr.Call -> {
+                // 成员调用（实例字段/方法）：成员 DefId 可能还没填（Resolver 不知道接收者的类型），
+                // 先按接收者类型补解析一次，再决定走哪条分支
+                val memberGet = expr.callee as? Expr.Get
                 // `枚举名.变体(...)`：变体构造器调用，直接按载荷检查实参
                 val variantSymbol = enumVariantSymbolOf(expr.callee)
                 if (variantSymbol != null) return inferEnumVariantCall(expr, variantSymbol, expected)
+                // `结构体名(...)`：构造器调用，直接按字段检查实参
+                val structSymbol = structConstructorOf(expr.callee)
+                if (structSymbol != null) return inferStructCall(expr, structSymbol, expected)
+                // 实例方法调用（`p.method(...)`）：方法符号可能还没解析，先按接收者类型补解析。
+                // 注意顺序：枚举/结构体构造器要在前面判掉，否则 `Option.Some("s")` 会被当成
+                // 「在类型名 `Option` 上取成员」而报「枚举类型不能作为值使用」
+                val member = instanceMemberOf(expr.callee) ?: (memberGet?.let { resolveInstanceMember(it) })
+                if (member != null && memberGet != null && member.values.get(Symbol.STRUCT_METHOD_KEY) == true) {
+                    return inferInstanceMethodCall(expr, memberGet, member, expected)
+                }
 
                 val callee = inferExpr(expr.callee)
                 val combined = Seq<Constraint>(0)
@@ -1221,6 +1960,11 @@ class TypeInferencer(val context: CompilerContext) {
                 }
                 // `枚举名.xxx` 中 xxx 不是变体：Resolver 已报「没有这个变体」，这里静默降级
                 if (enumTypeSymbolOf(expr.obj) != null) return InferResult(BuiltinType.Error, Seq(0))
+
+                // 成员访问（字段读取 / 方法引用）：member 的 DefId 由 Resolver 按接收者类型填好，
+                // 嵌套成员访问（`a.b.c` 的里层）则由这里补解析
+                val member = instanceMemberOf(expr) ?: resolveInstanceMember(expr)
+                if (member != null) return inferInstanceMember(expr, member)
 
                 val ot = inferExpr(expr.obj)
                 val combined = Seq<Constraint>(0)
@@ -1368,6 +2112,9 @@ class TypeInferencer(val context: CompilerContext) {
             if (symbol?.values?.get(Symbol.ENUM_KEY) == true) {
                 return enumAppType(symbol, argTypes, nestedArgs, expr)
             }
+            if (symbol?.values?.get(Symbol.STRUCT_KEY) == true) {
+                return structAppType(symbol, argTypes, nestedArgs, expr)
+            }
             return if (symbol?.type == BuiltinType.Array) {
                 if (nestedArgs.size != 1) {
                     val diagnostic = error(
@@ -1391,6 +2138,10 @@ class TypeInferencer(val context: CompilerContext) {
         if (symbol?.values?.get(Symbol.ENUM_KEY) == true) {
             // 裸写 `Option`：类型实参全部待推断（与裸 `Array` 的宽松处理一致）
             return enumAppType(symbol, Seq<Type>(0), null, expr)
+        }
+        if (symbol?.values?.get(Symbol.STRUCT_KEY) == true) {
+            // 裸写 `Wrapper`：类型实参全部待推断
+            return structAppType(symbol, Seq<Type>(0), null, expr)
         }
         return when {
             symbol == null -> Type.Error
@@ -1418,8 +2169,35 @@ class TypeInferencer(val context: CompilerContext) {
         argTypes: Seq<Type>,
         writtenArgs: Seq<Expr.Identifier>?,
         at: Expr,
+    ): Type = namedTypeApp(symbol, Symbol.ENUM_TYPE_PARAM_COUNT_KEY, argTypes, writtenArgs, at)
+
+    /**
+     * 结构体类型应用 `Wrapper<Int>`（泛型 struct 与泛型 enum 走同一套数量检查与诊断）。
+     */
+    private fun structAppType(
+        symbol: Symbol,
+        argTypes: Seq<Type>,
+        writtenArgs: Seq<Expr.Identifier>?,
+        at: Expr,
+    ): Type = namedTypeApp(symbol, Symbol.STRUCT_TYPE_PARAM_COUNT_KEY, argTypes, writtenArgs, at)
+
+    /**
+     * 具名泛型类型应用（枚举 / 结构体共用）：`名字<实参...>` 或裸写 `名字`。
+     *
+     * - 声明了 0 个类型参数：写出任何类型实参都报 [diag.type-not-generic]；
+     * - [argTypes] 为空（裸写 `Option` / `Wrapper`）：按「全部待推断」补 fresh 变量；
+     * - 数量不符：报 [diag.type-arg-count] 并补 note 指向声明处、逐个标出多余实参。
+     *
+     * 两个错误都按 rustc E0107 的口径补全诊断（[writtenArgs] 为写出来的类型实参 AST，供定位使用）。
+     */
+    private fun namedTypeApp(
+        symbol: Symbol,
+        paramCountKey: String,
+        argTypes: Seq<Type>,
+        writtenArgs: Seq<Expr.Identifier>?,
+        at: Expr,
     ): Type {
-        val declaredCount = symbol.values.get(Symbol.ENUM_TYPE_PARAM_COUNT_KEY) as? Int ?: 0
+        val declaredCount = symbol.values.get(paramCountKey) as? Int ?: 0
         if (declaredCount == 0) {
             if (!argTypes.isEmpty) {
                 val diagnostic = error(bundle.format("diag.type-not-generic", symbol.name)).label(at, "")
@@ -1517,6 +2295,15 @@ class TypeInferencer(val context: CompilerContext) {
         return when (expr) {
             is Expr.Identifier -> expr
             is Expr.Annotation -> expr.expr as? Expr.Identifier
+            else -> null
+        }
+    }
+
+    /** 从 `SelfRef` 或 `Annotation(SelfRef, ...)` 中取出隐式接收者标记 */
+    private fun unwrapSelfRef(expr: Expr): Expr.SelfRef? {
+        return when (expr) {
+            is Expr.SelfRef -> expr
+            is Expr.Annotation -> expr.expr as? Expr.SelfRef
             else -> null
         }
     }

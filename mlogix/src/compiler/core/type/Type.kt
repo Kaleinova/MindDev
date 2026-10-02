@@ -58,9 +58,13 @@ sealed class Type {
 
     /**
      * 友好打印类型（用于诊断消息；区别于 data class 自动生成的 `toString`）。
+     *
+     * 具名类型只打印名字（`Str`、`Option<Int>`、`Point`）：诊断里出现 `Con(Str)`
+     * 这种内部表示对使用者毫无意义。类型变量保留内部下标（`Var(3)`），
+     * 因为它本来就是「还没推断出来的位置」的内部标识。
      */
     fun pretty(): String = when (this) {
-        is Con -> "Con($name)"
+        is Con -> name
         is Var -> "Var($index)"
         is Func -> "(${params.joinToString(", ") { it.pretty() }}) -> ${result.pretty()}"
         is Arr -> "Array<${element.pretty()}>"

@@ -49,5 +49,47 @@ class Symbol(
 
         /** [values] 中记录变体载荷信息 [VariantPayload] 的键（TypeInferencer 写入，诊断用）。 */
         const val VARIANT_PAYLOAD_KEY = "variantPayload"
+
+        /** [values] 中标记"结构体类型"符号的键（Resolver 写入，TypeInferencer 读取）。 */
+        const val STRUCT_KEY = "isStruct"
+
+        /** [values] 中记录结构体声明类型参数数量的键（Resolver 写入，类型实参数量检查用）。 */
+        const val STRUCT_TYPE_PARAM_COUNT_KEY = "structTypeParamCount"
+
+        /** [values] 中记录字段表 [StructFields] 的键（Resolver 写入，字段访问查找用）。 */
+        const val STRUCT_FIELDS_KEY = "structFields"
+
+        /** [values] 中记录方法表 [StructMethods] 的键（Resolver 写入，方法调用查找用）。 */
+        const val STRUCT_METHODS_KEY = "structMethods"
+
+        /**
+         * [values] 中记录字段声明表 [StructFieldTable] 的键
+         * （Resolver 写入字段名/DefId/位置/来源，TypeInferencer 写入字段类型）。
+         */
+        const val STRUCT_FIELD_TABLE_KEY = "structFieldTable"
+
+        /** [values] 中标记"结构体字段"符号的键（Resolver 写入，成员访问判定用）。 */
+        const val STRUCT_FIELD_KEY = "isStructField"
+
+        /**
+         * [values] 中记录**结构体字段类型**的键（TypeInferencer 写入，按声明顺序）：
+         * 字段符号自身也挂着类型，但构造器检查要按顺序取一整个列表，故在结构体符号上再存一份。
+         */
+        const val STRUCT_FIELD_TYPES_KEY = "structFieldTypes"
+
+        /** [values] 中记录**结构体字段默认值**的键（TypeInferencer 写入，按声明顺序；无默认值的位为 null）。 */
+        const val STRUCT_FIELD_DEFAULTS_KEY = "structFieldDefaults"
+
+        /** [values] 中标记"结构体方法"符号的键（Resolver 写入，成员访问判定用）。 */
+        const val STRUCT_METHOD_KEY = "isStructMethod"
+
+        /** [values] 中记录方法**所属结构体符号**的键（Resolver 写入，方法调用时取签名与成员表）。 */
+        const val STRUCT_METHOD_OWNER_KEY = "structMethodOwner"
+
+        /**
+         * [values] 中标记「结构体符号的类型方案是**构造器**」的键（TypeInferencer 写入）。
+         * 值位置读结构体名（`set f = Point`）时据此产出构造器函数类型，而不是结构体类型本身。
+         */
+        const val STRUCT_CONSTRUCTOR_KEY = "structConstructor"
     }
 }

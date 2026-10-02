@@ -49,6 +49,10 @@ abstract class Diagnostic(
         return help
     }
 
+    override fun toString(): String {
+        return "Diagnostic(message='$message', level=$level, labels=$labels, suggestions=$suggestions)"
+    }
+
     enum class DiagLevel {
         WARNING, ERROR
     }
@@ -76,6 +80,10 @@ abstract class Diagnostic(
         fun label(spanned: Spanned, text: String = "") {
             labels.add(Label(spanned.span(), text, if (labels.isEmpty) LabelStyle.Primary else LabelStyle.Secondary))
         }
+
+        override fun toString(): String {
+            return "Note(text=$text, ${labels})}"
+        }
     }
 
     /** 一条帮助 */
@@ -91,6 +99,10 @@ abstract class Diagnostic(
         fun replace(spanned: Spanned, code: String) {
             labels.add(Label(spanned.span(), code, LabelStyle.Replace))
         }
+
+        override fun toString(): String {
+            return "Help(text=$text, ${labels})}"
+        }
     }
 
     /** Lexer 产生的问题 */
@@ -103,6 +115,9 @@ abstract class Diagnostic(
     class SemanticDiag(message: String, level: DiagLevel) : Diagnostic(message, level)
 
     // ---------- 渲染实现 ----------
+
+    fun render(): String = render(null)
+
     /**
      * 渲染诊断（含代码片段）。
      *
@@ -144,10 +159,6 @@ abstract class Diagnostic(
             }
         }
     }
-
-
-    override fun toString(): String = render(null)
-
 
     /**
      * 渲染一个文件
