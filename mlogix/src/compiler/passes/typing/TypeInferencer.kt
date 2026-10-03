@@ -448,6 +448,47 @@ class TypeInferencer(val context: CompilerContext) {
     }
 
     /**
+     * 返回值声明（`stmt.results`）→ 声明方信息（类型 + 来源树 + 声明 span）；没有声明时返回 null。
+     *
+     * 语法与建模的对应关系（返回值声明在解析期已被展平成 [Stmt.Fn.results] 的元素列表）：
+     * - 具名结果 `-> r : Int`：元素是 [Expr.Annotation]，类型取冒号后的类型表达式（`r` 只是结果名，
+     *   不参与类型构造）；
+     * - 裸写结果 `-> Int`、`-> T`、`-> Array<Int>`：元素本身就是类型表达式（`?` 由解析期合成为
+     *   `Null` 标识符，走同一条路）；
+     * - **多个结果**（`-> Int, Str`、`-> a: Int, b: Str`）：类型是 [Type.TupleType]，
+     *   分量按声明顺序对应。名字**不进入类型**——元组是结构化类型，跨函数同构即相等；
+     *   名字只作为声明信息（诊断定位、将来的解构/按名返回），因此不产生无法标注的匿名具名类型。
+     *
+     * 来源树按 [TypeOrigin] 的下标约定与类型同构：单结果是该结果类型表达式的来源，
+     * 多结果是以整段声明为根、各分量为子项的来源树，于是元素级失配能下钻到出错的那个结果上。
+     */
+    private fun resultDeclarationOf(stmt: Stmt.Fn): ResultDeclaration? {
+        val results = stmt.results ?: return null
+        if (results.isEmpty) return null
+
+        val types = Seq<Type>(results.size)
+        val origins = Seq<TypeOrigin>(results.size)
+        for (result in results) {
+            if (result is Expr.Annotation) {
+                // 具名结果：类型是冒号后的类型表达式（多个枚举值由 annotationToType 报「暂不支持」）
+                types.add(annotationToType(result))
+                origins.add(annotationToOrigin(result))
+            } else {
+                // 裸写结果：整个表达式就是类型表达式
+                types.add(variantToType(result))
+                origins.add(variantToOrigin(result))
+            }
+        }
+
+        if (types.size == 1) {
+            return ResultDeclaration(types.get(0), origins.get(0), results.get(0).span)
+        }
+        // 多结果：声明 span 覆盖整段（`Int, Str`），来源树按分量同序
+        val span = Span.between(results.get(0), results.get(results.size - 1))
+        return ResultDeclaration(Type.TupleType(types), TypeOrigin(span, origins), span)
+    }
+
+    /**
      * 函数声明：为函数符号构造 [Type.Func]，绑定形参类型，分析函数体。
      *
      * 泛型形参（`fn foo<T, E>`）：
@@ -525,33 +566,30 @@ class TypeInferencer(val context: CompilerContext) {
         if (!paramDeclInfo.isEmpty) paramDecls.put(fnSymbol.id, paramDeclInfo)
         if (isGeneric) fnTypeParamVars.put(fnSymbol.id, typeParamVars)
 
-        // 返回值类型：无注解 → fresh 变量；单一返回值有注解 → 注解类型（泛型）或 Equal 约束（非泛型）。
-        // 多返回值（`-> a: T1, b: T2`）尚未建模（Type.Func 只有单一 result），暂不约束。
+        // 返回值类型：无声明 → fresh 变量；有声明 → 声明类型（泛型直接用、非泛型加 Equal 约束）。
+        // 多返回值按**元组**建模（`-> Int, Str` ≡ `(Int, Str)`），声明信息见 [resultDeclarationOf]。
         var resultType: Type = solver.freshVar()
         var resultOrigin: TypeOrigin? = null
         // 返回值也可下推期望类型（`return Option.Some("s")` 对 `-> r : Option<Int>`），
         // 但注解含本函数自己的类型参数时不下推（那些变量跨调用点共享）
         var resultPush: ExpectedType? = null
-        // 返回类型不匹配时的声明方 label：有注解就指注解本身（`-> r : Int` 的 `Int`），
+        // 返回类型不匹配时的声明方 label：有声明就指声明本身（`-> r : Int` 的 `r : Int`），
         // 否则退回函数名位置（那里是函数的声明处）
         var resultDeclSpan: Span = stmt.name?.span ?: stmt.span
-        stmt.results?.let { results ->
-            if (results.size == 1) {
-                val result = results[0]
-                if (result is Expr.Annotation) {
-                    val declType = annotationToType(result)
-                    resultOrigin = annotationToOrigin(result)
-                    resultDeclSpan = result.span
-                    if (!isGeneric || !mentionsAnyVar(declType, typeParamVars)) {
-                        resultPush = ExpectedType(declType, resultOrigin)
-                    }
-                    if (isGeneric) {
-                        resultType = declType
-                        registerVarSpan(declType, result.span)
-                    } else {
-                        constraints.add(Constraint.Equal(resultType, declType, result.span, result.span))
-                    }
-                }
+        val declaredResult = resultDeclarationOf(stmt)
+        if (declaredResult != null) {
+            resultOrigin = declaredResult.origin
+            resultDeclSpan = declaredResult.span
+            if (!isGeneric || !mentionsAnyVar(declaredResult.type, typeParamVars)) {
+                resultPush = ExpectedType(declaredResult.type, declaredResult.origin)
+            }
+            if (isGeneric) {
+                resultType = declaredResult.type
+                registerVarSpan(declaredResult.type, declaredResult.span)
+            } else {
+                constraints.add(
+                    Constraint.Equal(resultType, declaredResult.type, declaredResult.span, declaredResult.span)
+                )
             }
         }
 
@@ -842,28 +880,25 @@ class TypeInferencer(val context: CompilerContext) {
         }
         if (!paramDeclInfo.isEmpty) paramDecls.put(methodSymbol.id, paramDeclInfo)
 
-        // 返回值类型：与 analyzeFnStmt 同规则（单一返回值注解 → 注解类型 / Equal 约束）
+        // 返回值类型：与 analyzeFnStmt 同规则（见 [resultDeclarationOf]，多返回值同样是元组）
         var resultType: Type = solver.freshVar()
         var resultOrigin: TypeOrigin? = null
         var resultPush: ExpectedType? = null
         var resultDeclSpan: Span = method.name?.span ?: method.span
-        method.results?.let { results ->
-            if (results.size == 1) {
-                val result = results[0]
-                if (result is Expr.Annotation) {
-                    val declType = annotationToType(result)
-                    resultOrigin = annotationToOrigin(result)
-                    resultDeclSpan = result.span
-                    if (!isGeneric || !mentionsAnyVar(declType, allTypeParamVars)) {
-                        resultPush = ExpectedType(declType, resultOrigin)
-                    }
-                    if (isGeneric) {
-                        resultType = declType
-                        registerVarSpan(declType, result.span)
-                    } else {
-                        constraints.add(Constraint.Equal(resultType, declType, result.span, result.span))
-                    }
-                }
+        val declaredResult = resultDeclarationOf(method)
+        if (declaredResult != null) {
+            resultOrigin = declaredResult.origin
+            resultDeclSpan = declaredResult.span
+            if (!isGeneric || !mentionsAnyVar(declaredResult.type, allTypeParamVars)) {
+                resultPush = ExpectedType(declaredResult.type, declaredResult.origin)
+            }
+            if (isGeneric) {
+                resultType = declaredResult.type
+                registerVarSpan(declaredResult.type, declaredResult.span)
+            } else {
+                constraints.add(
+                    Constraint.Equal(resultType, declaredResult.type, declaredResult.span, declaredResult.span)
+                )
             }
         }
 
@@ -2391,6 +2426,15 @@ class TypeInferencer(val context: CompilerContext) {
             val None = TypeAnnotation(BuiltinType.Unknown, null)
         }
     }
+
+    /**
+     * 返回值声明的声明方信息（见 [resultDeclarationOf]）。
+     *
+     * @param type 声明类型：单结果是该结果类型，多结果是由各结果类型构成的 [Type.TupleType]
+     * @param origin 与 [type] 同构的来源树（单结果 = 该类型表达式；多结果 = 以整段声明为根、分量为子项）
+     * @param span 声明方 label 的位置：单结果是该结果声明本身（`r : Int` / `Int`），多结果是整段声明
+     */
+    private class ResultDeclaration(val type: Type, val origin: TypeOrigin?, val span: Span)
 
     /**
      * 泛型函数登记信息：求解完成后基于已求解的 body 重建 TypeScheme。

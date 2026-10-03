@@ -477,7 +477,8 @@ class Parser(
                         consume(TokenType.IDENTIFIER) {
                             error(bundle.get("diag.miss-ident-as-result")).label(lookAhead(0))
                         }?.let {
-                            val expr = annotation(Expr.Identifier(it))
+                            // 名字后可以跟类型实参（`-> Array<Int>`）；写法与类型注解里的类型表达式一致
+                            val expr = annotation(identifierWithTypeArgs(it))
                             isSeparatorOptional = expr !is Expr.Annotation
                             return@let expr
                         }
@@ -1168,11 +1169,26 @@ class Parser(
 
         } else if (check(TokenType.LPAREN)) {
             val lParen = next()
-            val expr = expression()
-            if (expr is ErrorExpr) return ErrorExpr(between(lParen, expr))
+            val first = expression()
+            if (first is ErrorExpr) return ErrorExpr(between(lParen, first))
+
+            // `(a, b, ...)`：元组字面量（多返回值就是元组，`return (1, "s")`）；
+            // 没有逗号时保持 `(a)` 的分组语义
+            if (check(TokenType.COMMA)) {
+                val elements = Seq<Expr>(4)
+                elements.add(first)
+                while (match(TokenType.COMMA)) {
+                    if (check(TokenType.RPAREN)) break // 允许尾随逗号
+                    val element = expression()
+                    if (element is ErrorExpr) return ErrorExpr(between(lParen, element))
+                    elements.add(element)
+                }
+                consume(TokenType.RPAREN)
+                return Expr.Tuple(between(lParen, prevToken), elements)
+            }
 
             consume(TokenType.RPAREN)
-            return expr
+            return first
 
         } else if (check(TokenType.LBRACE)) {
             val lBrace = next()
@@ -1202,26 +1218,37 @@ class Parser(
     private fun identifier(): Expr {
         if (check(TokenType.IDENTIFIER)) {
             val id = next()
-            val snapshot = createSnapshotWithDiagHandler()
-            val result = generics()
-            if (result == null) {
-                restoreSnapshot(snapshot)
-            } else {
-                if (result.remaining != 0) {
-                    error(bundle.get("diag.redundant-gt"))
-                        .label(prevToken.span.cutLast(result.remaining))
-                }
-                if (result.args.size != 0) {
-                    // 带类型实参的标识符：span 要覆盖到 `>`（即 `Option<Int>` 整体），
-                    // 否则内层类型实参（`Int`）会落在注解 span 之外，诊断便无法收窄到它
-                    return Expr.Identifier(between(id, prevToken, result.remaining), id, result.args)
-                }
-            }
-            return Expr.Identifier(id)
+            return identifierWithTypeArgs(id)
         }
         error(bundle.format("diag.miss-expression", lookAhead(0).type))
             .label(lookAhead(0), "")
         return ErrorExpr(next().span)
+    }
+
+    /**
+     * 已消耗名字 token 后，尝试把紧随其后的类型实参（`Array<Int>`、`Option<Option<Int>>`）
+     * 挂到这个标识符上；没有 `<...>` 时就是裸标识符。
+     *
+     * 供表达式/类型表达式（[identifier]）与**裸写返回值类型**（`-> Array<Int>`）共用：
+     * 后者此前只消费名字、丢掉类型实参，于是 `-> Array<Int>` 被当成裸 `Array`（元素类型退化成未知）。
+     */
+    private fun identifierWithTypeArgs(id: Token): Expr.Identifier {
+        val snapshot = createSnapshotWithDiagHandler()
+        val result = generics()
+        if (result == null) {
+            restoreSnapshot(snapshot)
+            return Expr.Identifier(id)
+        }
+        if (result.remaining != 0) {
+            error(bundle.get("diag.redundant-gt"))
+                .label(prevToken.span.cutLast(result.remaining))
+        }
+        if (result.args.size != 0) {
+            // 带类型实参的标识符：span 要覆盖到 `>`（即 `Option<Int>` 整体），
+            // 否则内层类型实参（`Int`）会落在注解 span 之外，诊断便无法收窄到它
+            return Expr.Identifier(between(id, prevToken, result.remaining), id, result.args)
+        }
+        return Expr.Identifier(id)
     }
 
     private data class TypeArgsResult(val args: Seq<Expr.Identifier>, val remaining: Int)

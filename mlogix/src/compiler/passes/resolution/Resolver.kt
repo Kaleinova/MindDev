@@ -197,11 +197,17 @@ class Resolver(private val context: CompilerContext) {
             }
         }
 
-        // 返回值声明中的类型注解：同样只做类型名的名称解析
+        // 返回值声明中的类型：同样只做类型名的名称解析。
+        // - 具名结果（`-> r : Int`）：解析冒号**之后**的类型表达式；`r` 是结果名，不是类型名，不能查表；
+        // - 裸写结果（`-> Int`、`-> T`、`-> Array<Int>`，以及 `?` 在解析期合成的 `Null`）：
+        //   整个表达式就是类型表达式，必须一起做名称解析——此前只处理具名形式，裸写结果永远拿不到
+        //   `defId`，类型推断阶段只能退化成 `Type.Error`，返回值注解事实上被忽略。
         stmt.results?.let { results ->
-            for (r in results) {
-                if (r is Expr.Annotation) {
-                    for (variant in r.annotations) resolveAnnotationNames(variant, fnScope)
+            for (result in results) {
+                if (result is Expr.Annotation) {
+                    for (variant in result.annotations) resolveAnnotationNames(variant, fnScope)
+                } else {
+                    resolveAnnotationNames(result, fnScope)
                 }
             }
         }
