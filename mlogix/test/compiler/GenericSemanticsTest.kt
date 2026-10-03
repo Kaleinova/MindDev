@@ -1,9 +1,13 @@
 package mlogix.compiler
 
 import arc.files.Fi
+import arc.struct.Seq
 import arc.util.I18NBundle.createBundle
 import mlogix.compiler.core.CompilerConfig
 import mlogix.compiler.core.SourceFile
+import mlogix.compiler.core.symbol.SymbolTable
+import mlogix.compiler.core.type.BuiltinType
+import mlogix.compiler.core.type.Type
 import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.passes.parsing.Lexer
 import mlogix.compiler.passes.parsing.Parser
@@ -11,7 +15,7 @@ import mlogix.compiler.passes.resolution.Resolver
 import mlogix.compiler.passes.typing.TypeInferencer
 import mlogix.compiler.pipeline.CompilationContext
 import mlogix.util.I18N
-import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
@@ -37,12 +41,25 @@ class GenericSemanticsTest {
 
     /** 解析 → 名称解析 → 类型推断，返回推断后的错误数（parser.parse 会先清空诊断） */
     private fun analyze(source: String): Int {
+        analyzeSymbols(source)
+        return context.diagHandler.errorNum()
+    }
+
+    /** 解析 → 名称解析 → 类型推断，返回推断后的符号表（诊断仍记在 context.diagHandler） */
+    private fun analyzeSymbols(source: String): SymbolTable {
         context.diagHandler.clear()
         val sourceFile = SourceFile(source)
         val ast = parser.parse(sourceFile)
         val result = resolver.resolve(ast, sourceFile)
         inferencer.analyze(result, sourceFile)
-        return context.diagHandler.errorNum()
+        return result.symbolTable
+    }
+
+    /** 求解后符号 [name] 的类型 */
+    private fun typeOf(table: SymbolTable, name: String): Type {
+        val symbol = table.all().firstOrNull { it.name == name }
+        assertNotNull(symbol, "符号 `$name` 必须存在")
+        return symbol!!.type
     }
 
     // ========== 正例：0 错误 ==========
@@ -177,6 +194,40 @@ class GenericSemanticsTest {
                 """.trimIndent()
             )
         )
+    }
+
+    /**
+     * 符号类型必须是求解终态：函数符号在 walk 阶段挂的是 `(Var(k)) -> Var(m)`（形参/返回值
+     * 各是一个待求解变量），求解后应写回 `(Int) -> Int`。
+     * 回归：旧实现只把「类型本身恰好是变量」的符号写回，函数这类复合类型会被整体跳过。
+     *
+     * 返回类型写成**具名注解**（`-> r : Int`）：裸写 `-> Int` 当前不会被识别为返回值类型声明
+     * （返回值类型只由 `return` 表达式推断出来），用它会让这个回归测试耦合到那个问题上。
+     */
+    @Test
+    fun `solved signature is written back to the function symbol`() {
+        val table = analyzeSymbols("fn f(x: Int) -> r : Int { return x }")
+        assertEquals(Type.Func(Seq.with(BuiltinType.Int), BuiltinType.Int), typeOf(table, "f"))
+    }
+
+    @Test
+    fun `generic function symbol keeps its quantified type params`() {
+        // 泛型函数符号的类型保持含**量化**类型参数的签名（`(T) -> T`），不能被误当成具体类型替换掉
+        val table = analyzeSymbols(
+            """
+            fn id<T>(x: T) -> r : T { return x }
+            set a = id(42)
+            set b = id("hello")
+            """.trimIndent()
+        )
+        val signature = typeOf(table, "id") as? Type.Func
+        assertNotNull(signature, "泛型函数符号的类型应当是函数类型")
+        assertEquals(1, signature!!.params.size)
+        assertTrue(
+            signature.params.get(0) is Type.Var,
+            "泛型函数的形参应保持量化的类型参数，而不是被替换成某个调用点的具体类型",
+        )
+        assertEquals(signature.params.get(0), signature.result)
     }
 
     // ========== 反例：预期错误 ==========

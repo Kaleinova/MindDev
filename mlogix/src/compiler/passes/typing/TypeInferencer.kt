@@ -129,27 +129,26 @@ class TypeInferencer(val context: CompilerContext) {
             info.symbol.type = solvedBody
         }
 
-        // propagate solved inferred types back to symbols
+        // 把求解终态写回符号。
+        //
+        // walk 阶段写进符号的类型可能是**含未求解变量**的复合结构（`set b = Option.Some("aaa")`
+        // 记下的是 `Option<Var(2)>`），终态只有求解器知道，所以这里对每个符号整体
+        // [TypeSolver.read] 一次。旧实现只处理「类型本身恰好是变量」的符号，漏掉了复合类型：
+        // `b` 的类型于是停在 `Option<Var(2)>`，而不是求解后的 `Option<Str>`。
         for (symbol in symbolTable.all()) {
-            val inferred = symbol.values.get("inferred") as? Type
-            if (inferred != null) {
-                val final = solver.read(inferred)
-                if (final !is Type.Var) {
-                    // update symbol type if previously Unknown
-                    if (symbol.type == BuiltinType.Unknown) symbol.type = final
-                    symbol.values.put("final", final)
-                }
-            } else if (symbol.type is Type.Var &&
-                symbol.values.get(Symbol.TYPE_PARAM_KEY) != true
-            ) {
-                // 形参等直接挂类型变量的符号：求解后把具体类型写回（如 `a: Int` → Con("Int")）。
-                // 类型参数符号除外——它的类型必须保持为量化变量，供注解 `x: T` 引用。
-                val final = solver.read(symbol.type)
-                if (final !is Type.Var) {
-                    symbol.type = final
-                    symbol.values.put("final", final)
-                }
-            }
+            // 类型参数符号除外——它的类型必须保持为量化变量，供注解 `x: T` 引用
+            if (symbol.values.get(Symbol.TYPE_PARAM_KEY) == true) continue
+            // 符号类型仍是 Unknown 时，待求解的类型挂在 "inferred"（`set a` 之后 `a = ...`、
+            // 未注解形参等写入该槽）；否则符号自身的类型就是权威来源
+            val pending = symbol.values.get("inferred") as? Type
+            val current = if (symbol.type == BuiltinType.Unknown && pending != null) pending else symbol.type
+            if (current == BuiltinType.Unknown) continue
+            // 求解终态仍是类型变量，表示该变量从未被约束（如 `set x = Option.None` 的载荷）：
+            // 保持未定类型，交给后续 pass / 后续语句继续推断。
+            val final = solver.read(current)
+            if (final is Type.Var) continue
+            symbol.type = final
+            symbol.values.put("final", final)
         }
     }
 
@@ -185,6 +184,16 @@ class TypeInferencer(val context: CompilerContext) {
         constraints.addAll(valueR.constraints)
 
         if (symbol == null) return
+
+        // 变量的权威类型：有注解以注解为准，否则以初值推断出的类型为准。它可能含尚未求解的
+        // 类型变量（`set b = Option.Some("aaa")` 得到 `Option<Var(2)>`），所以登记进 "inferred"，
+        // 求解后由 [analyze] 末尾的写回阶段读出终态（`Option<Str>`）。
+        // 必须在这里覆盖 "inferred"：上面推断**声明左侧标识符**时已在同一槽留下一个只代表
+        // 「该变量自身」的占位变量，它与初值/注解没有任何约束相连——留着会让写回阶段读到它，
+        // 误判成「该变量仍未解出」而跳过 symbol.type。
+        val authoritative = declared?.type ?: valueR.type
+        if (authoritative != BuiltinType.Unknown) symbol.values.put("inferred", authoritative)
+
         if (declared != null) {
             // 初值已就地消费期望类型（字面量/数组字面量/变体构造器）时跳过，避免重复报错。
             // 使用方=初值类型（label 在初值处），声明方=注解类型（label 在注解处，可下钻到 `Int`）。

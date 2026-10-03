@@ -8,8 +8,11 @@ import mlogix.compiler.ast.Stmt
 import mlogix.compiler.core.CompilerConfig
 import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
+import mlogix.compiler.core.symbol.SymbolTable
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
+import mlogix.compiler.core.type.BuiltinType
+import mlogix.compiler.core.type.Type
 import mlogix.compiler.diagnostic.DiagHandler
 import mlogix.compiler.passes.parsing.Lexer
 import mlogix.compiler.passes.parsing.Parser
@@ -18,6 +21,7 @@ import mlogix.compiler.passes.typing.TypeInferencer
 import mlogix.compiler.pipeline.CompilationContext
 import mlogix.util.I18N
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
@@ -50,13 +54,29 @@ class EnumTest {
 
     /** 解析 → 名称解析 → 类型推断，返回推断后的错误数（parser.parse 会先清空诊断） */
     private fun analyze(source: String): Int {
+        analyzeSymbols(source)
+        return context.diagHandler.errorNum()
+    }
+
+    /** 解析 → 名称解析 → 类型推断，返回推断后的符号表（诊断仍记在 context.diagHandler） */
+    private fun analyzeSymbols(source: String): SymbolTable {
         context.diagHandler.clear()
         val sourceFile = SourceFile(source)
         val ast = parser.parse(sourceFile)
         val result = resolver.resolve(ast, sourceFile)
         inferencer.analyze(result, sourceFile)
-        return context.diagHandler.errorNum()
+        return result.symbolTable
     }
+
+    /** 求解后符号 [name] 的类型 */
+    private fun typeOf(table: SymbolTable, name: String): Type {
+        val symbol = table.all().firstOrNull { it.name == name }
+        assertNotNull(symbol, "符号 `$name` 必须存在")
+        return symbol!!.type
+    }
+
+    /** `Option<arg>` 类型 */
+    private fun optionOf(arg: Type): Type = Type.App(Type.Con("Option"), Seq.with(arg))
 
     // ========== 语法 ==========
 
@@ -228,6 +248,57 @@ class EnumTest {
                 """.trimIndent()
             )
         )
+    }
+
+    /**
+     * 求解后的类型必须写回符号：`Option.Some("aaa")` 在 walk 阶段得到的是**含未求解变量**的
+     * `Option<Var(k)>`（载荷类型由约束在求解期才定下来），而符号上最终挂的必须是终态 `Option<Str>`。
+     *
+     * 回归：旧实现在写回阶段只处理「类型本身恰好是变量」的符号，于是这类复合类型被整体跳过，
+     * `b` 的类型停在 `Option<Var(2)>`。
+     */
+    @Test
+    fun `solved variant type is written back to the variable symbol`() {
+        val table = analyzeSymbols(
+            """
+            enum Option<T> {
+                None
+                Some(T)
+            }
+            set b = Option.Some("aaa")
+            """.trimIndent()
+        )
+        assertEquals(optionOf(BuiltinType.Str), typeOf(table, "b"))
+    }
+
+    @Test
+    fun `nested variant type is written back fully solved`() {
+        val table = analyzeSymbols(
+            """
+            enum Option<T> {
+                None
+                Some(T)
+            }
+            set n = Option.Some(Option.Some(1))
+            """.trimIndent()
+        )
+        assertEquals(optionOf(optionOf(BuiltinType.Int)), typeOf(table, "n"))
+    }
+
+    @Test
+    fun `each variable keeps its own solved type`() {
+        val table = analyzeSymbols(
+            """
+            enum Option<T> {
+                None
+                Some(T)
+            }
+            set a = Option.Some(1)
+            set b = Option.Some("s")
+            """.trimIndent()
+        )
+        assertEquals(optionOf(BuiltinType.Int), typeOf(table, "a"))
+        assertEquals(optionOf(BuiltinType.Str), typeOf(table, "b"))
     }
 
     @Test
