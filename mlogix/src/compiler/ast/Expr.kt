@@ -2,21 +2,24 @@ package mlogix.compiler.ast
 
 import arc.struct.Seq
 import mlogix.compiler.core.span.Span
-import mlogix.compiler.core.span.Spanned
 import mlogix.compiler.core.symbol.DefId
 import mlogix.compiler.core.token.Token
 
 //Expression
-abstract class Expr(span: Spanned) : ASTNode(span.span()) {
+abstract class Expr(span: Span) : ASTNode(span) {
     /**
      * 字面量
      */
-    data class Literal(val token: Token) : Expr(token)
+    data class Literal(val token: Token) : Expr(token.span())
 
     /**
      * 标识符
      */
-    data class Identifier(val token: Token, val typeArgs: Seq<Identifier>? = null) : Expr(token) {
+    data class Identifier(override val span: Span, val token: Token, val typeArgs: Seq<Identifier>? = null) : Expr(
+        span
+    ) {
+        constructor(token: Token) : this(token.span, token)
+
         /**
          * 由 Resolver 填充：此标识符解析到的定义句柄。
          * 未声明（解析失败）时为 null。注意：不参与 data class 的 equals/hashCode。

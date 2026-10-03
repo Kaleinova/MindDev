@@ -1214,7 +1214,7 @@ class Parser(
                 if (result.args.size != 0) {
                     // 带类型实参的标识符：span 要覆盖到 `>`（即 `Option<Int>` 整体），
                     // 否则内层类型实参（`Int`）会落在注解 span 之外，诊断便无法收窄到它
-                    return Expr.Identifier(withSpanOf(id, prevToken, result.remaining), result.args)
+                    return Expr.Identifier(between(id, prevToken, result.remaining), id, result.args)
                 }
             }
             return Expr.Identifier(id)
@@ -1270,7 +1270,7 @@ class Parser(
                         } else {
                             // 与 identifier() 同理：span 覆盖到 `>`（`Option<Int>` 整体），
                             // 多消耗的 `>`（`>>` 拆分）要切掉
-                            args.add(Expr.Identifier(withSpanOf(id, prevToken, subArgs.remaining), subArgs.args))
+                            args.add(Expr.Identifier(between(id, prevToken, subArgs.remaining), id, subArgs.args))
                         }
                         remaining += subArgs.remaining
                         match(TokenType.COMMA)
@@ -1779,25 +1779,12 @@ class Parser(
     }
 
     /**
-     * 复制 [from] 的类型与字面量，但 span 改为 `[from] 起点 .. [to] 终点 - dropTail`。
-     *
-     * 用于把「标识符 + 类型实参」（`Option<Int>`）合成一个整体的位置：
-     * 嵌套泛型解析为了处理 `>>` 会一次消耗两个 `>`，多出来的部分用 [dropTail] 切掉。
-     */
-    private fun withSpanOf(from: Token, to: Token, dropTail: Int = 0): Token {
-        val start = from.span.start()
-        val end = to.span.end() - dropTail
-        if (end <= start) return from
-        return Token(Span.between(sourceFile.index, start, end), from.type, from.literal)
-    }
-
-    /**
      * 生成当前文件的span
      * @param from 起始
      * @param to 末尾
      */
-    private fun between(from: Spanned, to: Spanned): Span {
-        return Span.between(sourceFile.index, from.span().start(), to.span().end())
+    private fun between(from: Spanned, to: Spanned, dropTail: Int = 0): Span {
+        return Span.between(sourceFile.index, from.span().start(), to.span().end() - dropTail)
     }
 
     /** 将复合赋值运算符token拆分 */

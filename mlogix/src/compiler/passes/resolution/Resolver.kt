@@ -422,7 +422,7 @@ class Resolver(private val context: CompilerContext) {
                 val defId = scope.lookup(name)
                 if (defId == null) {
                     error(bundle.format("diag.undeclared-identifier", name))
-                        .label(expr, bundle.get("diag.undeclared-identifier.help"))
+                        .label(expr.token, bundle.get("diag.undeclared-identifier.help"))
                 } else {
                     expr.defId = defId
                 }
