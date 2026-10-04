@@ -74,10 +74,10 @@ enum class TokenType(private val keyword: String? = null) {
     DOC_COMMENT,
 
     // 其他
-    NEWLINE,  // 换行符
-    UNKNOWN,  //未知
-    ERROR,  //错误
-    EOF; // 标识源码结尾
+    NEWLINE, // 换行符
+    UNKNOWN, // 未知
+    DUMMY,   // 错误占位
+    EOF;     // 标识源码结尾
 
     override fun toString(): String {
         // 如果有对应的关键字，直接返回

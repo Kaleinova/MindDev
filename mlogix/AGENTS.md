@@ -64,9 +64,9 @@
   **关键设计：Parser 持有 Lexer，通过前瞻缓冲按需实时调用 `Lexer.scanToken()`——绝不预生成完整 token 列表再交给
   Parser**（省掉中间数组开销）。错误恢复/回溯依赖 Lexer 快照（`Lexer.createSnapshot/restoreSnapshot`）。
 - **类型系统** `mlogix/src/compiler/core/type/`：`Type` 是 **sealed 代数结构**（`Con`/`Var`/`Func`/`Arr`/`TupleType`/
-  `Unknown`/`Error`），结构相等用 `==`；`TypeVar` 即 `Type.Var(index: Int)`，并查集按 Int 索引（`arc.struct.IntMap`）；
+  `Unknown`/`Dummy`），结构相等用 `==`；`TypeVar` 即 `Type.Var(index: Int)`，并查集按 Int 索引（`arc.struct.IntMap`）；
   `TypeScheme`（∀ 多态）提供 `instantiate/generalize/freeTypeVars`；`TypeVisitor` 是统一遍历器（occurs check、自由变量
-  收集都用它）。**类型系统绝不 throw**，出错注入 `Type.Error` 抑制级联错误。
+  收集都用它）。 **类型系统绝不 throw**，出错注入 `Type.Error` 抑制级联错误。
 - **语义分析 / 类型推断** `mlogix/src/compiler/passes/typing/`：`TypeInferencer`（约束生成 + 经 `TypeSolver` 惰性求解，
   配套 `Constraint`、`InferResult`），包装为 `TypeInferencePass`。
 - **AST** `mlogix/src/compiler/ast/`（`Expr`/`Stmt`；`ASTPrinter.kt` 用于调试打印）。

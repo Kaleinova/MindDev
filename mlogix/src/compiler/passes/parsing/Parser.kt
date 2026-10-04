@@ -6,7 +6,7 @@ import arc.func.Prov
 import arc.struct.Queue
 import arc.struct.Seq
 import mlogix.compiler.ast.Expr
-import mlogix.compiler.ast.Expr.ErrorExpr
+import mlogix.compiler.ast.Expr.Dummy
 import mlogix.compiler.ast.Expr.Get
 import mlogix.compiler.ast.Pattern
 import mlogix.compiler.ast.Stmt
@@ -155,7 +155,7 @@ class Parser(
         val start = next()
 
         val condition = expression()
-        if (condition is ErrorExpr) {
+        if (condition is Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -182,7 +182,7 @@ class Parser(
         val start = next()
 
         val scrutinee = expression()
-        if (scrutinee is ErrorExpr) {
+        if (scrutinee is Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -340,7 +340,7 @@ class Parser(
             expr = expression()
         }
 
-        if (expr is ErrorExpr) {
+        if (expr is Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -364,7 +364,7 @@ class Parser(
         val start = flag ?: head
 
         val expr = expression()
-        if (expr is ErrorExpr) {
+        if (expr is Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -528,7 +528,7 @@ class Parser(
         val start = next()
         if (matchStmtEnd()) return Stmt.Return(start.span, null)
         val expr = expression()
-        if (expr is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
+        if (expr is Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
         return Stmt.Return(between(start, expr), expr)
     }
 
@@ -545,7 +545,7 @@ class Parser(
         if (expr is Expr.Identifier) {
             expr = annotation(expr)
         }
-        if (expr is ErrorExpr) {
+        if (expr is Dummy) {
             when (recoverByTokenTree(TokenType.RECOVERY)) {
                 in TokenType.ASSIGNS -> {}
 
@@ -558,7 +558,7 @@ class Parser(
             if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return Stmt.SetVar(between(start, expr), expr, null)
         } else {
-            if (assignStmt.value is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
+            if (assignStmt.value is Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return Stmt.SetVar(between(start, assignStmt), expr, assignStmt)
         }
     }
@@ -648,7 +648,7 @@ class Parser(
         val ident = Expr.Identifier(fieldName)
 
         val annotation = annotation(ident)
-        if (annotation is ErrorExpr) return Stmt.Struct.StructField(annotation.span, ident, null, null)
+        if (annotation is Dummy) return Stmt.Struct.StructField(annotation.span, ident, null, null)
         val type = annotation as? Expr.Annotation
 
         var default: Expr? = null
@@ -859,7 +859,7 @@ class Parser(
 
     private fun exprStmt(): Stmt? {
         val expr = expression()
-        if (expr is ErrorExpr) {
+        if (expr is Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -870,7 +870,7 @@ class Parser(
             if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return Stmt.ExprStmt(expr.span, expr)
         } else {
-            if (assignStmt.value is ErrorExpr || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
+            if (assignStmt.value is Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return assignStmt
         }
     }
@@ -924,7 +924,7 @@ class Parser(
 
     private fun or(): Expr {
         var expr = and()
-        if (expr is ErrorExpr) return expr
+        if (expr is Dummy) return expr
 
         var errorRight: Expr? = null
 
@@ -932,7 +932,7 @@ class Parser(
             val operator = next()
 
             val right = and()
-            if (right is ErrorExpr) return ErrorExpr(between(expr, right))
+            if (right is Dummy) return Dummy(between(expr, right))
 
             if (right is Expr.Binary && right.operator.type == TokenType.AND_AND) {
                 errorRight = right
@@ -949,13 +949,13 @@ class Parser(
 
     private fun and(): Expr {
         var expr = equality()
-        if (expr is ErrorExpr) return expr
+        if (expr is Dummy) return expr
 
         while (check(TokenType.AND_AND)) {
             val operator = next()
 
             val right = equality()
-            if (right is ErrorExpr) return ErrorExpr(between(expr, right))
+            if (right is Dummy) return Dummy(between(expr, right))
 
             if (right is Expr.Binary && right.operator.type == TokenType.OR_OR) {
                 error(bundle.get("diag.ambiguous-logic"))
@@ -980,12 +980,12 @@ class Parser(
      */
     private fun equality(): Expr {
         var expr = comparison()
-        if (expr is ErrorExpr) return expr
+        if (expr is Dummy) return expr
 
         if (check(TokenType.EQ_OPERATORS)) {
             val operator = next()
             val right = comparison()
-            if (right is ErrorExpr) return ErrorExpr(between(expr, right))
+            if (right is Dummy) return Dummy(between(expr, right))
             expr = Expr.Binary(expr, operator, right)
         }
 
@@ -997,12 +997,12 @@ class Parser(
      */
     private fun comparison(): Expr {
         var expr = range()
-        if (expr is ErrorExpr) return expr
+        if (expr is Dummy) return expr
 
         if (check(TokenType.COMPARISON_OPERATORS)) {
             val operator = next()
             val right = range()
-            if (right is ErrorExpr) return ErrorExpr(between(expr, right))
+            if (right is Dummy) return Dummy(between(expr, right))
             expr = Expr.Binary(expr, operator, right)
         }
 
@@ -1021,13 +1021,13 @@ class Parser(
 
             // :< expr    := expr
             val right = addAndSub()
-            if (right is ErrorExpr) return ErrorExpr(between(operator, right))
+            if (right is Dummy) return Dummy(between(operator, right))
             return Expr.Range(between(operator, right), null, operator, right)
         }
 
         // expr
         var expr = addAndSub()
-        if (expr is ErrorExpr) return expr
+        if (expr is Dummy) return expr
 
         // expr :< ...    expr := ...
         if (!isStmtEnd && check(TokenType.RANGE_OPERATORS)) {
@@ -1040,7 +1040,7 @@ class Parser(
 
             // expr :< expr    expr := expr
             val right = addAndSub()
-            if (right is ErrorExpr) return ErrorExpr(between(expr, right))
+            if (right is Dummy) return Dummy(between(expr, right))
             expr = Expr.Range(between(expr, right), expr, operator, right)
         }
 
@@ -1049,7 +1049,7 @@ class Parser(
 
     private fun addAndSub(): Expr {
         var expr = mulAndDiv()
-        if (expr is ErrorExpr) return expr
+        if (expr is Dummy) return expr
 
         while (check(TokenType.ADD_SUB_OPERATORS)) {
             val operator = next()
@@ -1062,7 +1062,7 @@ class Parser(
 
     private fun mulAndDiv(): Expr {
         var expr = pow()
-        if (expr is ErrorExpr) return expr
+        if (expr is Dummy) return expr
 
         while (check(TokenType.MUL_DIV_OPERATORS)) {
             val operator = next()
@@ -1075,7 +1075,7 @@ class Parser(
 
     private fun pow(): Expr {
         var expr = unary()
-        if (expr is ErrorExpr) return expr
+        if (expr is Dummy) return expr
 
         if (check(TokenType.STAR_STAR)) {
             val operator = next()
@@ -1090,7 +1090,7 @@ class Parser(
         if (check(TokenType.UNARY_OPERATORS)) {
             val operator = next()
             val right = unary()
-            if (right is ErrorExpr) return ErrorExpr(between(operator, right))
+            if (right is Dummy) return Dummy(between(operator, right))
             return Expr.Unary(operator, right)
         }
 
@@ -1099,7 +1099,7 @@ class Parser(
 
     private fun suffixExpr(): Expr {
         var expr = primary()
-        if (expr is ErrorExpr) return expr
+        if (expr is Dummy) return expr
 
         while (true) {
             when {
@@ -1107,7 +1107,7 @@ class Parser(
                     val lBracket = next()
 
                     val index = expression()
-                    if (index is ErrorExpr) return ErrorExpr(between(expr, lookAhead(0)))
+                    if (index is Dummy) return Dummy(between(expr, lookAhead(0)))
 
                     val rBracket = consume(TokenType.RBRACKET) {
                         error(bundle.get("diag.index-error")).label(lBracket)
@@ -1131,13 +1131,13 @@ class Parser(
                             break
                         }
                         val innerExpr = expression()
-                        if (innerExpr is ErrorExpr) {
+                        if (innerExpr is Dummy) {
                             error(bundle.get("diag.miss-call-end")).apply {
                                 label(lParen, bundle.get("diag.arg-start"))
                                 help(bundle.get("miss-arg-end.help"))
                                     .insert(lookAhead(0), ")")
                             }
-                            return ErrorExpr(between(expr, lookAhead(0)))
+                            return Dummy(between(expr, lookAhead(0)))
                         }
                         args.add(innerExpr)
                         match(TokenType.COMMA) // 可选逗号
@@ -1170,7 +1170,7 @@ class Parser(
         } else if (check(TokenType.LPAREN)) {
             val lParen = next()
             val first = expression()
-            if (first is ErrorExpr) return ErrorExpr(between(lParen, first))
+            if (first is Dummy) return Dummy(between(lParen, first))
 
             // `(a, b, ...)`：元组字面量（多返回值就是元组，`return (1, "s")`）；
             // 没有逗号时保持 `(a)` 的分组语义
@@ -1180,7 +1180,7 @@ class Parser(
                 while (match(TokenType.COMMA)) {
                     if (check(TokenType.RPAREN)) break // 允许尾随逗号
                     val element = expression()
-                    if (element is ErrorExpr) return ErrorExpr(between(lParen, element))
+                    if (element is Dummy) return Dummy(between(lParen, element))
                     elements.add(element)
                 }
                 consume(TokenType.RPAREN)
@@ -1222,7 +1222,7 @@ class Parser(
         }
         error(bundle.format("diag.miss-expression", lookAhead(0).type))
             .label(lookAhead(0), "")
-        return ErrorExpr(next().span)
+        return Dummy(next().span)
     }
 
     /**
@@ -1355,7 +1355,7 @@ class Parser(
         // id :
         if (!isStmtEnd && check(TokenType.COLON)) {
             val colon = next()
-            val enums = anonymousEnum() ?: return ErrorExpr(between(colon, prevToken))
+            val enums = anonymousEnum() ?: return Dummy(between(colon, prevToken))
 
             if (!enums.isEmpty) return Expr.Annotation(subject, enums)
             // 如果标注数量为0，视作Identifier
@@ -1379,14 +1379,14 @@ class Parser(
         while (!isAtEnd) {
             if (check(TokenType.LPAREN)) {
                 val tuple = tuple()
-                if (tuple is ErrorExpr) {
+                if (tuple is Dummy) {
                     hasError = true
                 } else if (!hasError) {
                     enums.add(tuple)
                 }
             } else {
                 val id = identifier()
-                if (id is ErrorExpr) {
+                if (id is Dummy) {
                     hasError = true
                 } else if (!hasError) {
                     enums.add(id)
@@ -1423,13 +1423,13 @@ class Parser(
             }
         )
 //         TODO style提示
-        if (hasError) return ErrorExpr(between(lParen, prevToken))
+        if (hasError) return Dummy(between(lParen, prevToken))
         return Expr.Tuple(between(lParen, prevToken), elements)
     }
 
     /**
      * 解析一组连续表达式序列
-     * @param elementProv 解析并返回一个序列元素，无法解析时请返回[ErrorExpr]/`null`以调用恢复，务必消耗元素，否则死循环
+     * @param elementProv 解析并返回一个序列元素，无法解析时请返回[Dummy]/`null`以调用恢复，务必消耗元素，否则死循环
      * @param separators 分隔符，方法内已有自带的分隔符[matchStmtEnd]，可填`setOf()`以作空格
      * @param isSeparatorOptional 是否允许省略分隔符
      * @param missSeparator 当`expect(end)`失败时使用missSeparator报错
@@ -1450,7 +1450,7 @@ class Parser(
         while (!check(end)) {
             val snapshot = createSnapshot()
             val element = elementProv.get()
-            if (element == null || element is ErrorExpr) {
+            if (element == null || element is Dummy) {
                 restoreSnapshot(snapshot)
             } else {
                 // 成功解析元素

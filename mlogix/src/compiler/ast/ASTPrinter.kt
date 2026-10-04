@@ -114,7 +114,7 @@ object ASTPrinter {
                 val value = field.get(node)
                 printField(field.name, value, newIndent, fieldIsLast)
             } catch (e: IllegalAccessException) {
-                printLine(newIndent, fieldIsLast, "ERROR: ${e.message}")
+                printLine(newIndent, fieldIsLast, "DUMMY: ${e.message}")
             }
         }
     }

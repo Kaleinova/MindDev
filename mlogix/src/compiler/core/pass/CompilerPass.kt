@@ -26,7 +26,7 @@ interface CompilerPass<in I, out O> {
      * 在 [sourceFile] 下执行该 Pass。
      *
      * 注意：Pass 内部不抛异常中断管道；错误一律通过 [CompilerContext.diagHandler] 报告。
-     * 管道继续运行，即使出现错误，也带上 ErrorType/ErrorExpr 继续。
+     * 管道继续运行，即使出现错误，也带上 Dummy 继续。
      */
     fun execute(input: I, sourceFile: SourceFile): O
 }

@@ -11,8 +11,8 @@ import arc.struct.Seq
  * - **不可变**：字段/方法等附属信息不挂在类型节点上（见 [TypeRegistry] / 未来的类型环境），
  *   类型本身只是纯数据 DAG，可安全缓存、可被多个 Pass 共享。
  * - **[Var] 以 Int 为索引**：指向求解器并查集的槽位，避免 String 分配与字符串哈希。
- * - **[Unknown] 与 [Error] 严格分离**：
- *   [Unknown] = "尚未约束，允许继续推断"；[Error] = "诊断已报告，后续约束静默通过"（抑制级联错误）。
+ * - **[Unknown] 与 [Dummy] 严格分离**：
+ *   [Unknown] = "尚未约束，允许继续推断"；[Dummy] = "诊断已报告，后续约束静默通过"（抑制级联错误）。
  */
 sealed class Type {
 
@@ -46,8 +46,8 @@ sealed class Type {
     /** 未定类型：尚未被约束（允许再次推断） */
     data object Unknown : Type()
 
-    /** 错误类型：诊断已报告，抑制级联错误 */
-    data object Error : Type()
+    /** 占位类型：错误诊断已报告，抑制级联错误 */
+    data object Dummy : Type()
 
     /**
      * 以 [TypeVisitor] 遍历此类型（默认递归访问子节点）。
@@ -71,7 +71,7 @@ sealed class Type {
         is App -> "${con.name}<${args.joinToString(", ") { it.pretty() }}>"
         is TupleType -> "(${elements.joinToString(", ") { it.pretty() }})"
         Unknown -> "Unknown"
-        Error -> "Error"
+        Dummy -> "Dummy"
     }
 }
 

@@ -7,8 +7,8 @@ import mlogix.compiler.core.token.TokenType
  *
  * 说明：
  * - 所有内置类型都是 [Type.Con]，结构相等，可直接用 `==` 比较；
- * - [toType] **绝不抛异常**（分析代码无 throw 铁律），未知字面量类型返回 [Type.Error]；
- * - [Unknown] / [Error] 是 [Type.Unknown] / [Type.Error] 的别名，便于调用处语义清晰。
+ * - [toType] **绝不抛异常**（分析代码无 throw 铁律），未知字面量类型返回 [Type.Dummy]；
+ * - [Unknown] / [Dummy] 是 [Type.Unknown] / [Type.Dummy] 的别名，便于调用处语义清晰。
  */
 object BuiltinType {
     val Num: Type.Con = Type.Con("Num")
@@ -26,16 +26,16 @@ object BuiltinType {
     val Unknown: Type = Type.Unknown
 
     /** 错误类型（诊断已报告，抑制级联错误） */
-    val Error: Type = Type.Error
+    val Dummy: Type = Type.Dummy
 
     /**
      * 将给定的 TokenType 转换为对应的 Type。
      *
-     * 注意 `NUM` / `COL` 都必须有类型：一旦返回 [Type.Error]，求解器会静默通过
+     * 注意 `NUM` / `COL` 都必须有类型：一旦返回 [Type.Dummy]，求解器会静默通过
      * （见 [mlogix.compiler.passes.typing.TypeSolver]），等于这些字面量在 `Num` 位置上完全不检查。
      * 颜色值按语言文档「底层上是 `Num`」也归入 [Num]；若将来引入独立的 `Col` 类型，改这里即可。
      *
-     * @return 已知字面量返回对应类型；未知 token 返回 [Type.Error]（绝不抛异常）
+     * @return 已知字面量返回对应类型；未知 token 返回 [Type.Dummy]（绝不抛异常）
      */
     fun toType(tokenType: TokenType): Type {
         return when (tokenType) {
@@ -47,7 +47,7 @@ object BuiltinType {
             TokenType.STR -> Str
             TokenType.FN -> Fn
             TokenType.UNKNOWN -> Unknown
-            else -> Error
+            else -> Dummy
         }
     }
 }

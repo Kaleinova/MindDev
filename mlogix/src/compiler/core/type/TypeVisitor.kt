@@ -13,7 +13,7 @@ interface TypeVisitor {
      * 访问一个类型节点。
      *
      * 默认实现：递归访问子节点（Func 的形参与返回、Arr 的元素、TupleType 的元素）。
-     * Unknown / Error 视为叶子（无子节点）。
+     * Unknown / Dummy 视为叶子（无子节点）。
      * 注意：若子类覆写本方法，必须自行决定是否继续递归。
      */
     fun visit(type: Type) {
@@ -36,7 +36,7 @@ interface TypeVisitor {
                 for (e in type.elements) visit(e)
             }
 
-            Type.Unknown, Type.Error -> Unit
+            Type.Unknown, Type.Dummy -> Unit
         }
     }
 

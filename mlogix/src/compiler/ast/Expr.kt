@@ -105,5 +105,5 @@ abstract class Expr(span: Span) : ASTNode(span) {
     /**
      * 错误恢复占位符
      */
-    data class ErrorExpr(override val span: Span) : Expr(span)
+    data class Dummy(override val span: Span) : Expr(span)
 }

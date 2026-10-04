@@ -17,7 +17,7 @@ import mlogix.compiler.core.span.Span
  *   - [Type.App]：[Type.App.args] 同序；
  *   - [Type.Arr]：唯一子项 = 元素（`0`）；
  *   - [Type.TupleType]：[Type.TupleType.elements] 同序；
- *   - [Type.Con] / [Type.Var] / [Type.Unknown] / [Type.Error]：无子项。
+ *   - [Type.Con] / [Type.Var] / [Type.Unknown] / [Type.Dummy]：无子项。
  *
  * @param span 该（子）项在源码中的位置；未知时为 `null`（求解器就近退化到上一层的位置）
  * @param children 各子项的来源，顺序同子项下标约定；不知道的子项可以直接不写（下钻会退化为 null）

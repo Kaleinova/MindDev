@@ -98,9 +98,9 @@ class StructFieldTypes(
     /** 字段个数（声明顺序）；[types] 与 [defaults] 等长 */
     val count: Int get() = types.size
 
-    /** 第 [index] 个字段的类型；越界时返回 [Type.Error] */
+    /** 第 [index] 个字段的类型；越界时返回 [Type.Dummy] */
     fun typeAt(index: Int): Type {
-        if (index < 0 || index >= types.size) return Type.Error
+        if (index < 0 || index >= types.size) return Type.Dummy
         return types.get(index)
     }
 

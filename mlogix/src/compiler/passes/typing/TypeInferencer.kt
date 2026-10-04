@@ -701,7 +701,7 @@ class TypeInferencer(val context: CompilerContext) {
      *
      * - **类型**：非泛型 `Point` → [Type.Con]；泛型 `Wrapper<T>` → [Type.App]（与泛型枚举一致）；
      * - **字段类型**：有注解用注解类型；只有默认值时由默认值推断（`struct Point { x = 0 }`
-     *   的 `x` 是 `Int`）；两者都缺时 Parser 已报错，这里留 [BuiltinType.Error] 抑制级联；
+     *   的 `x` 是 `Int`）；两者都缺时 Parser 已报错，这里留 [BuiltinType.Dummy] 抑制级联；
      * - **构造器**：`构造器类型 = (字段类型...) -> 结构体类型`，字段有默认值时该位可省略
      *   （检查发生在调用点，见 [inferStructCall]）；类型方案量化声明的类型参数，
      *   于是 `Wrapper(1)` 与 `Wrapper("s")` 各自实例化、互不污染（与泛型枚举同机制）；
@@ -781,12 +781,12 @@ class TypeInferencer(val context: CompilerContext) {
     /**
      * 单个字段的类型与来源：有类型注解用注解类型，否则由默认值推断（[TypeSolver.freshVar] + 与默认值相等）。
      *
-     * 两者都缺时 Parser 已报「字段需要类型或默认值」，这里返回 [BuiltinType.Error] 抑制级联。
+     * 两者都缺时 Parser 已报「字段需要类型或默认值」，这里返回 [BuiltinType.Dummy] 抑制级联。
      */
     private fun analyzeStructField(field: Stmt.Struct.StructField): Pair<Type, TypeOrigin> {
         field.type?.let { return annotationToType(it) to annotationToOrigin(it) }
         val default = field.default
-            ?: return BuiltinType.Error to TypeOrigin(field.name.span)
+            ?: return BuiltinType.Dummy to TypeOrigin(field.name.span)
         // 只有默认值：字段类型 = 推断出的默认值类型；把默认值记录为该推断出来的类型
         val variable = solver.freshVar()
         val inferred = inferExpr(default, ExpectedType(variable, TypeOrigin(field.name.span)))
@@ -938,21 +938,21 @@ class TypeInferencer(val context: CompilerContext) {
         val defId = expr.defId
         if (defId == null) {
             // Resolver 已报 diag.undeclared-identifier（名称解析归它管），
-            // 这里静默降级为 Error，避免同一错误重复上报。
-            return InferResult(BuiltinType.Error, Seq(0), origin)
+            // 这里静默降级为 Dummy，避免同一错误重复上报。
+            return InferResult(BuiltinType.Dummy, Seq(0), origin)
         }
         val symbol = symbolTable.get(defId) ?: return InferResult(BuiltinType.Unknown, Seq(0), origin)
         if (symbol.values.get(Symbol.TYPE_PARAM_KEY) == true) {
             // 类型参数只能出现在类型位置（注解/类型实参），不能作为值使用
             error(bundle.format("diag.type-param-as-value", symbol.name))
                 .label(expr, "")
-            return InferResult(BuiltinType.Error, Seq(0), origin)
+            return InferResult(BuiltinType.Dummy, Seq(0), origin)
         }
         if (symbol.values.get(Symbol.ENUM_KEY) == true) {
             // 枚举类型名只能用来访问变体（`Color.Red`），不能当值；变体的类型就是枚举类型
             error(bundle.format("diag.enum-as-value", symbol.name))
                 .label(expr, bundle.format("diag.enum-as-value.help", symbol.name))
-            return InferResult(BuiltinType.Error, Seq(0), origin)
+            return InferResult(BuiltinType.Dummy, Seq(0), origin)
         }
         if (symbol.values.get(Symbol.STRUCT_CONSTRUCTOR_KEY) == true) {
             // 结构体名在值位置是**构造器**：`set f = Point` 得到函数值，`Point(1.0, 2.0)` 得到实例。
@@ -964,7 +964,7 @@ class TypeInferencer(val context: CompilerContext) {
             if (structFieldTypesOf(symbol).count == 0) {
                 error(bundle.format("diag.struct-unit-as-value", symbol.name))
                     .label(expr, bundle.format("diag.struct-unit-as-value.help", symbol.name))
-                return InferResult(BuiltinType.Error, Seq(0), origin)
+                return InferResult(BuiltinType.Dummy, Seq(0), origin)
             }
             return InferResult(
                 symbol.typeScheme.instantiateWith(Seq(0)) { solver.freshVar() },
@@ -1065,7 +1065,7 @@ class TypeInferencer(val context: CompilerContext) {
             Type.TupleType(elements)
         }
 
-        else -> Type.Error
+        else -> Type.Dummy
     }
 
     /** 变体载荷字段名（仅诊断用）；元组变体字段没有名字 */
@@ -1259,7 +1259,7 @@ class TypeInferencer(val context: CompilerContext) {
             Type.TupleType(elements)
         }
 
-        Type.Unknown, Type.Error -> type
+        Type.Unknown, Type.Dummy -> type
     }
 
     /** 结构体的字段类型与默认值（按声明顺序）；不是已分析的结构体时为空表 */
@@ -1307,7 +1307,7 @@ class TypeInferencer(val context: CompilerContext) {
         if (structSymbol == null) {
             // 接收者不是结构体实例（`1.0 .x`、`"s".get()`）：成员不可能存在。
             // 类型变量/错误类型下静默（还没解出来或已经报过错，避免级联）
-            if (objectType !is Type.Var && objectType !is Type.Error && objectType !is Type.Unknown) {
+            if (objectType !is Type.Var && objectType !is Type.Dummy && objectType !is Type.Unknown) {
                 error(bundle.format("diag.member-on-non-struct", memberName, objectType.pretty()))
                     .label(memberIdent, bundle.get("diag.member-on-non-struct.help"))
                 memberIdent.defId = ALREADY_RESOLVED_MEMBER
@@ -1422,7 +1422,7 @@ class TypeInferencer(val context: CompilerContext) {
 
         val argOrigins = Seq<TypeOrigin>(call.args.size)
         for ((i, arg) in call.args.withIndex()) {
-            val declaredType = if (i < parameterTypes.size) parameterTypes.get(i) else BuiltinType.Error
+            val declaredType = if (i < parameterTypes.size) parameterTypes.get(i) else BuiltinType.Dummy
             val fieldIndex = if (i < fieldTypes.size) i else -1
             val pushed = if (adoptedTypeArgs != null && structApp != null && fieldIndex >= 0) {
                 directPayloadExpectation(fieldTypes, fieldIndex, structApp.args, adoptedTypeArgs, expected?.origin)
@@ -1513,7 +1513,7 @@ class TypeInferencer(val context: CompilerContext) {
         if (!isStructInstance) {
             error(bundle.format("diag.member-on-non-struct", member.name, objectType.pretty()))
                 .label(get.field, bundle.get("diag.member-on-non-struct.help"))
-            return InferResult(BuiltinType.Error, combined)
+            return InferResult(BuiltinType.Dummy, combined)
         }
         val fieldType = substituteStructMember(typeNameOf(objectType)!!, member.type, objectType)
         return InferResult(fieldType, combined)
@@ -1540,7 +1540,7 @@ class TypeInferencer(val context: CompilerContext) {
         combined.addAll(objectResult.constraints)
 
         val structSymbol = member.values.get(Symbol.STRUCT_METHOD_OWNER_KEY) as? Symbol
-            ?: return InferResult(BuiltinType.Error, combined)
+            ?: return InferResult(BuiltinType.Dummy, combined)
 
         val explicitArgs = (memberGet.field as? Expr.Identifier)?.typeArgs
         if (explicitArgs != null && !explicitArgs.isEmpty) {
@@ -1819,7 +1819,7 @@ class TypeInferencer(val context: CompilerContext) {
                 // 隐式接收者：方法体内由 Resolver 构造，类型恒为方法所属结构体
                 val symbol = expr.instanceDefId?.let { symbolTable.get(it) }
                 if (symbol == null) {
-                    InferResult(BuiltinType.Error, Seq(0), TypeOrigin(expr.span))
+                    InferResult(BuiltinType.Dummy, Seq(0), TypeOrigin(expr.span))
                 } else {
                     InferResult(selfTypeOf(symbol), Seq(0), TypeOrigin(expr.span))
                 }
@@ -2003,7 +2003,7 @@ class TypeInferencer(val context: CompilerContext) {
                     return InferResult(instantiateVariant(variantSymbol, expr, explicitArgs), Seq(0))
                 }
                 // `枚举名.xxx` 中 xxx 不是变体：Resolver 已报「没有这个变体」，这里静默降级
-                if (enumTypeSymbolOf(expr.obj) != null) return InferResult(BuiltinType.Error, Seq(0))
+                if (enumTypeSymbolOf(expr.obj) != null) return InferResult(BuiltinType.Dummy, Seq(0))
 
                 // 成员访问（字段读取 / 方法引用）：member 的 DefId 由 Resolver 按接收者类型填好，
                 // 嵌套成员访问（`a.b.c` 的里层）则由这里补解析
@@ -2021,7 +2021,7 @@ class TypeInferencer(val context: CompilerContext) {
                 }
             }
 
-            is Expr.ErrorExpr -> InferResult(BuiltinType.Unknown, Seq(0))
+            is Expr.Dummy -> InferResult(BuiltinType.Unknown, Seq(0))
             else -> InferResult(BuiltinType.Unknown, Seq(0))
         }
     }
@@ -2054,7 +2054,7 @@ class TypeInferencer(val context: CompilerContext) {
      * 当前限制：注解语法是匿名枚举（多个枚举值，如 `Int | Str`、`?(Num Str)`），
      * 而类型系统尚未引入联合/枚举类型，因此：
      * - 单一枚举值（`a: Int`、`r: (Num, Str)`）→ 正常转换为 [Type]；
-     * - 多个枚举值 → 报「暂不支持」错误并返回 [Type.Error]（抑制级联错误）。
+     * - 多个枚举值 → 报「暂不支持」错误并返回 [Type.Dummy]（抑制级联错误）。
      *
      * @param annotation 形参/返回值的 `Expr.Annotation` 节点（内部注解即枚举值列表）
      * @return 注解对应的类型；无注解/无法转换时返回相应占位类型
@@ -2065,7 +2065,7 @@ class TypeInferencer(val context: CompilerContext) {
         if (variants.size > 1) {
             error(bundle.get("diag.union-not-supported"))
                 .label(annotation, bundle.get("diag.union-not-supported.help"))
-            return Type.Error
+            return Type.Dummy
         }
         return variantToType(variants[0])
     }
@@ -2075,7 +2075,7 @@ class TypeInferencer(val context: CompilerContext) {
      * - 标识符：经 [DefId] 查 [SymbolTable] 得符号类型；支持嵌套泛型注解（`Array<Int>`、`Array<T>`），
      *   转换细节见 [typeArgToType]；
      * - 元组：递归转换元素，产出 [Type.TupleType]；
-     * - 无法转换（defId 缺失 / 符号不存在 / 其它表达式）：返回 [Type.Error]。
+     * - 无法转换（defId 缺失 / 符号不存在 / 其它表达式）：返回 [Type.Dummy]。
      */
     private fun variantToType(expr: Expr): Type {
         return when (expr) {
@@ -2087,7 +2087,7 @@ class TypeInferencer(val context: CompilerContext) {
                 Type.TupleType(elements)
             }
 
-            else -> Type.Error
+            else -> Type.Dummy
         }
     }
 
@@ -2133,7 +2133,7 @@ class TypeInferencer(val context: CompilerContext) {
      * - 类型参数（`T`）→ 其类型变量（由 [analyzeFnStmt] 写入符号）；
      * - 内置/已知类型（`Int`）→ 符号类型；
      * - 裸 `Array` → 宽松视为 `Array<?>`（元素类型由后续约束推断，与旧行为一致）；
-     * - 解析失败（defId 缺失）→ [Type.Error]（Resolver 已报"未声明的类型名"）。
+     * - 解析失败（defId 缺失）→ [Type.Dummy]（Resolver 已报"未声明的类型名"）。
      *
      * 嵌套应用 `Head<Args...>`：
      * - 头部为 `Array` → [Type.App]（实参数量必须是 1）；
@@ -2149,7 +2149,7 @@ class TypeInferencer(val context: CompilerContext) {
                 // TODO: 支持高阶类型（对类型参数应用类型实参 `T<U>`，kind `* -> *`）后移除
                 error(bundle.format("diag.hkt-not-supported", expr.token.literal))
                     .label(expr, bundle.get("diag.hkt-not-supported.help"))
-                return Type.Error
+                return Type.Dummy
             }
             val argTypes = Seq<Type>(nestedArgs.size)
             for (a in nestedArgs) argTypes.add(typeArgToType(a))
@@ -2166,7 +2166,7 @@ class TypeInferencer(val context: CompilerContext) {
                     ).label(expr, bundle.format("diag.explicit-type-arg-count.help", 1))
                     // `Array` 是内置类型，没有声明处可指；只标出多余的类型实参
                     labelExtraTypeArgs(diagnostic, nestedArgs, 1)
-                    Type.Error
+                    Type.Dummy
                 } else {
                     Type.App(BuiltinType.Array, argTypes)
                 }
@@ -2175,7 +2175,7 @@ class TypeInferencer(val context: CompilerContext) {
                     .label(expr, "")
                 // 不接受任何类型实参：凡写了的都是多余的
                 labelExtraTypeArgs(diagnostic, nestedArgs, 0)
-                Type.Error
+                Type.Dummy
             }
         }
         // 裸标识符
@@ -2188,7 +2188,7 @@ class TypeInferencer(val context: CompilerContext) {
             return structAppType(symbol, Seq<Type>(0), null, expr)
         }
         return when {
-            symbol == null -> Type.Error
+            symbol == null -> Type.Dummy
             symbol.values.get(Symbol.TYPE_PARAM_KEY) == true -> symbol.type
             symbol.type == BuiltinType.Array ->
                 // 裸 `Array`：宽松视为 `Array<Unknown>`
@@ -2247,7 +2247,7 @@ class TypeInferencer(val context: CompilerContext) {
                 val diagnostic = error(bundle.format("diag.type-not-generic", symbol.name)).label(at, "")
                 // 不接受任何类型实参：凡写了的都是多余的
                 labelExtraTypeArgs(diagnostic, writtenArgs, 0)
-                return Type.Error
+                return Type.Dummy
             }
             return Type.Con(symbol.name)
         }
@@ -2261,7 +2261,7 @@ class TypeInferencer(val context: CompilerContext) {
                 .label(at, bundle.format("diag.explicit-type-arg-count.help", declaredCount))
             noteTypeParamSource(diagnostic, symbol.id, declaredCount)
             labelExtraTypeArgs(diagnostic, writtenArgs, declaredCount)
-            return Type.Error
+            return Type.Dummy
         }
         return Type.App(Type.Con(symbol.name), argTypes)
     }

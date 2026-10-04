@@ -172,7 +172,7 @@ class TypeScheme(
      * - **`Type.Func`**：函数类型（如 `(A, B) -> C`）。递归替换所有参数类型和结果类型，构造新的 `Func`。
      * - **`Type.Arr`**：数组类型（如 `[]T`）。递归替换元素类型。
      * - **`Type.TupleType`**：元组类型（如 `(A, B)`）。递归替换所有元素。
-     * - **`Type.Unknown` / `Type.Error`**：特殊占位符（用于尚未推断或报错的情况），保持不变。
+     * - **`Type.Unknown` / `Type.Dummy`**：特殊占位符（用于尚未推断或报错的情况），保持不变。
      *
      * @param type 待替换的原始类型
      * @param subsTable 替换映射表，键为 `Int`（旧类型变量的索引），值为 `Type.Var`（新类型变量）
@@ -200,7 +200,7 @@ class TypeScheme(
                 Type.TupleType(elements)
             }
 
-            Type.Unknown, Type.Error -> type
+            Type.Unknown, Type.Dummy -> type
         }
     }
 }

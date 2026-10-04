@@ -21,7 +21,7 @@ import mlogix.util.I18N.bundle
  *   避免 String id 的分配与哈希开销；
  * - **Occurs check 是结构化遍历**（[TypeVisitor] + visited 集合），
  *   不再用 `toString().contains()` 字符串匹配（旧实现会把 `t1` 与 `t10` 误判为递归）；
- * - **[Type.Error] / [Type.Unknown] 静默通过**：错误类型抑制级联错误，
+ * - **[Type.Dummy] / [Type.Unknown] 静默通过**：错误类型抑制级联错误，
  *   未定类型不与任何具体类型冲突。
  */
 class TypeSolver(private val problems: DiagHandler, private val sourceFile: SourceFile) {
@@ -85,7 +85,7 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
                 Type.TupleType(elements)
             }
 
-            is Type.Con, Type.Unknown, Type.Error -> t
+            is Type.Con, Type.Unknown, Type.Dummy -> t
         }
     }
 
@@ -207,7 +207,7 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
             }
 
             // 错误类型 / 未定类型：静默通过（抑制级联错误，允许继续推断）
-            t1 is Type.Error || t2 is Type.Error || t1 is Type.Unknown || t2 is Type.Unknown -> Unit
+            t1 is Type.Dummy || t2 is Type.Dummy || t1 is Type.Unknown || t2 is Type.Unknown -> Unit
 
             t1 != t2 -> reportMismatch(t1, t2, usePos, declSite)
         }
@@ -274,7 +274,7 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
                         visit(rt)
                     }
 
-                    is Type.Con, Type.Unknown, Type.Error -> Unit
+                    is Type.Con, Type.Unknown, Type.Dummy -> Unit
                     else -> super.visit(type)
                 }
             }

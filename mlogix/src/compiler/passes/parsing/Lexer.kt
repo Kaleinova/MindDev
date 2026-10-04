@@ -351,7 +351,7 @@ class Lexer(private val context: CompilerContext) {
                             "0x${Integer.toHexString(c.code).uppercase(getDefault())}"
                         )
                     recover { ch: Char -> recoverTerminators.contains(ch) }
-                    return token(TokenType.ERROR, subString(start, current))
+                    return token(TokenType.DUMMY, subString(start, current))
                 }
             }
         }
@@ -402,7 +402,7 @@ class Lexer(private val context: CompilerContext) {
                 error(bundle.get("diag.invalid-hex-prefix"))
                     .label(span(start, start + 2), "")
                 recover { c: Char? -> !isDigit(c!!) && !isAlpha(c) }
-                return token(TokenType.ERROR)
+                return token(TokenType.DUMMY)
             }
             val builder = StringBuilder()
             while (!this.isAtEnd) {
@@ -415,7 +415,7 @@ class Lexer(private val context: CompilerContext) {
                     error(bundle.get("diag.invalid-hex-char"))
                         .label(span(current, current + 1), Integer.toHexString(peek().code))
                     recover { c: Char? -> !isDigit(c!!) && !isAlpha(c) }
-                    return token(TokenType.ERROR)
+                    return token(TokenType.DUMMY)
                 } else {
                     break
                 }
@@ -429,7 +429,7 @@ class Lexer(private val context: CompilerContext) {
                 error(bundle.get("diag.invalid-bin-prefix"))
                     .label(span(start, start + 2), "")
                 recover { c: Char? -> !isDigit(c!!) && !isAlpha(c) }
-                return token(TokenType.ERROR)
+                return token(TokenType.DUMMY)
             }
             val builder = StringBuilder()
             while (!this.isAtEnd) {
@@ -441,7 +441,7 @@ class Lexer(private val context: CompilerContext) {
                     error(bundle.get("diag.invalid-bin-char"))
                         .label(span(current, current + 1), Integer.toHexString(peek().code))
                     recover { c: Char? -> !isDigit(c!!) && !isAlpha(c) }
-                    return token(TokenType.ERROR)
+                    return token(TokenType.DUMMY)
                 } else {
                     break
                 }
@@ -606,14 +606,14 @@ class Lexer(private val context: CompilerContext) {
                 else -> {
                     error(bundle.format("diag.invalid-color-len", text.length))
                         .label(span(start + 1, current))
-                    return token(TokenType.ERROR)
+                    return token(TokenType.DUMMY)
                 }
             }
         }
 
         error(bundle.get("diag.invalid-color"))
             .label(span(start, current), "")
-        return token(TokenType.ERROR)
+        return token(TokenType.DUMMY)
     }
 
 
