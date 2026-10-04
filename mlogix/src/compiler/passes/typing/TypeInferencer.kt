@@ -2172,7 +2172,7 @@ class TypeInferencer(val context: CompilerContext) {
                 }
             } else {
                 val diagnostic = error(bundle.format("diag.type-not-generic", symbol?.name ?: expr.token.literal))
-                    .label(expr, "")
+                    .label(expr.token, "")
                 // 不接受任何类型实参：凡写了的都是多余的
                 labelExtraTypeArgs(diagnostic, nestedArgs, 0)
                 Type.Dummy
@@ -2212,7 +2212,7 @@ class TypeInferencer(val context: CompilerContext) {
         symbol: Symbol,
         argTypes: Seq<Type>,
         writtenArgs: Seq<Expr.Identifier>?,
-        at: Expr,
+        at: Expr.Identifier,
     ): Type = namedTypeApp(symbol, Symbol.ENUM_TYPE_PARAM_COUNT_KEY, argTypes, writtenArgs, at)
 
     /**
@@ -2222,7 +2222,7 @@ class TypeInferencer(val context: CompilerContext) {
         symbol: Symbol,
         argTypes: Seq<Type>,
         writtenArgs: Seq<Expr.Identifier>?,
-        at: Expr,
+        at: Expr.Identifier,
     ): Type = namedTypeApp(symbol, Symbol.STRUCT_TYPE_PARAM_COUNT_KEY, argTypes, writtenArgs, at)
 
     /**
@@ -2239,12 +2239,13 @@ class TypeInferencer(val context: CompilerContext) {
         paramCountKey: String,
         argTypes: Seq<Type>,
         writtenArgs: Seq<Expr.Identifier>?,
-        at: Expr,
+        at: Expr.Identifier,
     ): Type {
         val declaredCount = symbol.values.get(paramCountKey) as? Int ?: 0
         if (declaredCount == 0) {
             if (!argTypes.isEmpty) {
-                val diagnostic = error(bundle.format("diag.type-not-generic", symbol.name)).label(at, "")
+                val diagnostic = error(bundle.format("diag.type-not-generic", symbol.name))
+                    .label(at.token, "")
                 // 不接受任何类型实参：凡写了的都是多余的
                 labelExtraTypeArgs(diagnostic, writtenArgs, 0)
                 return Type.Dummy
