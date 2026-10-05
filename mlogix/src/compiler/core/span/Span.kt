@@ -54,7 +54,7 @@ class Span : Spanned {
     }
 
     /** 截取末尾部分 */
-    fun cutLast(len: Int): Span {
+    fun takeLast(len: Int): Span {
         if (len > len()) return this
         return Span(index(), end() - len, len)
     }

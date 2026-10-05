@@ -6,7 +6,6 @@ import arc.func.Prov
 import arc.struct.Queue
 import arc.struct.Seq
 import mlogix.compiler.ast.Expr
-import mlogix.compiler.ast.Expr.Dummy
 import mlogix.compiler.ast.Expr.Get
 import mlogix.compiler.ast.Pattern
 import mlogix.compiler.ast.Stmt
@@ -155,7 +154,7 @@ class Parser(
         val start = next()
 
         val condition = expression()
-        if (condition is Dummy) {
+        if (condition is Expr.Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -182,7 +181,7 @@ class Parser(
         val start = next()
 
         val scrutinee = expression()
-        if (scrutinee is Dummy) {
+        if (scrutinee is Expr.Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -340,7 +339,7 @@ class Parser(
             expr = expression()
         }
 
-        if (expr is Dummy) {
+        if (expr is Expr.Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -364,7 +363,7 @@ class Parser(
         val start = flag ?: head
 
         val expr = expression()
-        if (expr is Dummy) {
+        if (expr is Expr.Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -415,7 +414,7 @@ class Parser(
             if (result != null) {
                 if (result.remaining != 0) {
                     error(bundle.get("diag.redundant-gt"))
-                        .label(prevToken.span.cutLast(result.remaining))
+                        .label(prevToken.span.takeLast(result.remaining))
                 }
                 if (result.args.size != 0) {
                     typeParams = result.args
@@ -528,7 +527,7 @@ class Parser(
         val start = next()
         if (matchStmtEnd()) return Stmt.Return(start.span, null)
         val expr = expression()
-        if (expr is Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
+        if (expr is Expr.Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
         return Stmt.Return(between(start, expr), expr)
     }
 
@@ -545,7 +544,7 @@ class Parser(
         if (expr is Expr.Identifier) {
             expr = annotation(expr)
         }
-        if (expr is Dummy) {
+        if (expr is Expr.Dummy) {
             when (recoverByTokenTree(TokenType.RECOVERY)) {
                 in TokenType.ASSIGNS -> {}
 
@@ -558,7 +557,7 @@ class Parser(
             if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return Stmt.SetVar(between(start, expr), expr, null)
         } else {
-            if (assignStmt.value is Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
+            if (assignStmt.value is Expr.Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return Stmt.SetVar(between(start, assignStmt), expr, assignStmt)
         }
     }
@@ -574,12 +573,12 @@ class Parser(
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
-        val result = generics()
+        val result = if (check(TokenType.LESS)) generics() else null
         var typeParams: Seq<Expr.Identifier>? = null
         if (result != null) {
             if (result.remaining != 0) {
                 error(bundle.get("diag.redundant-gt"))
-                    .label(prevToken.span.cutLast(result.remaining))
+                    .label(prevToken.span.takeLast(result.remaining))
             }
             if (result.args.size != 0) {
                 typeParams = result.args
@@ -648,7 +647,7 @@ class Parser(
         val ident = Expr.Identifier(fieldName)
 
         val annotation = annotation(ident)
-        if (annotation is Dummy) return Stmt.Struct.StructField(annotation.span, ident, null, null)
+        if (annotation is Expr.Dummy) return Stmt.Struct.StructField(annotation.span, ident, null, null)
         val type = annotation as? Expr.Annotation
 
         var default: Expr? = null
@@ -656,6 +655,7 @@ class Parser(
         if (assign != null) {
             when (assign.operator.type) {
                 TokenType.ASSIGN -> default = assign.value
+
                 else -> {
                     error(bundle.get("diag.struct-field-default-operator"))
                         .label(assign.operator, "")
@@ -701,7 +701,7 @@ class Parser(
             if (result != null) {
                 if (result.remaining != 0) {
                     error(bundle.get("diag.redundant-gt"))
-                        .label(prevToken.span.cutLast(result.remaining))
+                        .label(prevToken.span.takeLast(result.remaining))
                 }
                 if (result.args.size != 0) {
                     typeParams = result.args
@@ -859,7 +859,7 @@ class Parser(
 
     private fun exprStmt(): Stmt? {
         val expr = expression()
-        if (expr is Dummy) {
+        if (expr is Expr.Dummy) {
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
@@ -870,7 +870,7 @@ class Parser(
             if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return Stmt.ExprStmt(expr.span, expr)
         } else {
-            if (assignStmt.value is Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
+            if (assignStmt.value is Expr.Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
             return assignStmt
         }
     }
@@ -924,7 +924,7 @@ class Parser(
 
     private fun or(): Expr {
         var expr = and()
-        if (expr is Dummy) return expr
+        if (expr is Expr.Dummy) return expr
 
         var errorRight: Expr? = null
 
@@ -932,7 +932,7 @@ class Parser(
             val operator = next()
 
             val right = and()
-            if (right is Dummy) return Dummy(between(expr, right))
+            if (right is Expr.Dummy) return Expr.Dummy(between(expr, right))
 
             if (right is Expr.Binary && right.operator.type == TokenType.AND_AND) {
                 errorRight = right
@@ -949,13 +949,13 @@ class Parser(
 
     private fun and(): Expr {
         var expr = equality()
-        if (expr is Dummy) return expr
+        if (expr is Expr.Dummy) return expr
 
         while (check(TokenType.AND_AND)) {
             val operator = next()
 
             val right = equality()
-            if (right is Dummy) return Dummy(between(expr, right))
+            if (right is Expr.Dummy) return Expr.Dummy(between(expr, right))
 
             if (right is Expr.Binary && right.operator.type == TokenType.OR_OR) {
                 error(bundle.get("diag.ambiguous-logic"))
@@ -980,12 +980,12 @@ class Parser(
      */
     private fun equality(): Expr {
         var expr = comparison()
-        if (expr is Dummy) return expr
+        if (expr is Expr.Dummy) return expr
 
         if (check(TokenType.EQ_OPERATORS)) {
             val operator = next()
             val right = comparison()
-            if (right is Dummy) return Dummy(between(expr, right))
+            if (right is Expr.Dummy) return Expr.Dummy(between(expr, right))
             expr = Expr.Binary(expr, operator, right)
         }
 
@@ -997,12 +997,12 @@ class Parser(
      */
     private fun comparison(): Expr {
         var expr = range()
-        if (expr is Dummy) return expr
+        if (expr is Expr.Dummy) return expr
 
         if (check(TokenType.COMPARISON_OPERATORS)) {
             val operator = next()
             val right = range()
-            if (right is Dummy) return Dummy(between(expr, right))
+            if (right is Expr.Dummy) return Expr.Dummy(between(expr, right))
             expr = Expr.Binary(expr, operator, right)
         }
 
@@ -1021,13 +1021,13 @@ class Parser(
 
             // :< expr    := expr
             val right = addAndSub()
-            if (right is Dummy) return Dummy(between(operator, right))
+            if (right is Expr.Dummy) return Expr.Dummy(between(operator, right))
             return Expr.Range(between(operator, right), null, operator, right)
         }
 
         // expr
         var expr = addAndSub()
-        if (expr is Dummy) return expr
+        if (expr is Expr.Dummy) return expr
 
         // expr :< ...    expr := ...
         if (!isStmtEnd && check(TokenType.RANGE_OPERATORS)) {
@@ -1040,7 +1040,7 @@ class Parser(
 
             // expr :< expr    expr := expr
             val right = addAndSub()
-            if (right is Dummy) return Dummy(between(expr, right))
+            if (right is Expr.Dummy) return Expr.Dummy(between(expr, right))
             expr = Expr.Range(between(expr, right), expr, operator, right)
         }
 
@@ -1049,7 +1049,7 @@ class Parser(
 
     private fun addAndSub(): Expr {
         var expr = mulAndDiv()
-        if (expr is Dummy) return expr
+        if (expr is Expr.Dummy) return expr
 
         while (check(TokenType.ADD_SUB_OPERATORS)) {
             val operator = next()
@@ -1062,7 +1062,7 @@ class Parser(
 
     private fun mulAndDiv(): Expr {
         var expr = pow()
-        if (expr is Dummy) return expr
+        if (expr is Expr.Dummy) return expr
 
         while (check(TokenType.MUL_DIV_OPERATORS)) {
             val operator = next()
@@ -1075,7 +1075,7 @@ class Parser(
 
     private fun pow(): Expr {
         var expr = unary()
-        if (expr is Dummy) return expr
+        if (expr is Expr.Dummy) return expr
 
         if (check(TokenType.STAR_STAR)) {
             val operator = next()
@@ -1090,7 +1090,7 @@ class Parser(
         if (check(TokenType.UNARY_OPERATORS)) {
             val operator = next()
             val right = unary()
-            if (right is Dummy) return Dummy(between(operator, right))
+            if (right is Expr.Dummy) return Expr.Dummy(between(operator, right))
             return Expr.Unary(operator, right)
         }
 
@@ -1099,7 +1099,7 @@ class Parser(
 
     private fun suffixExpr(): Expr {
         var expr = primary()
-        if (expr is Dummy) return expr
+        if (expr is Expr.Dummy) return expr
 
         while (true) {
             when {
@@ -1107,7 +1107,7 @@ class Parser(
                     val lBracket = next()
 
                     val index = expression()
-                    if (index is Dummy) return Dummy(between(expr, lookAhead(0)))
+                    if (index is Expr.Dummy) return Expr.Dummy(between(expr, lookAhead(0)))
 
                     val rBracket = consume(TokenType.RBRACKET) {
                         error(bundle.get("diag.index-error")).label(lBracket)
@@ -1131,13 +1131,13 @@ class Parser(
                             break
                         }
                         val innerExpr = expression()
-                        if (innerExpr is Dummy) {
+                        if (innerExpr is Expr.Dummy) {
                             error(bundle.get("diag.miss-call-end")).apply {
                                 label(lParen, bundle.get("diag.arg-start"))
                                 help(bundle.get("miss-arg-end.help"))
                                     .insert(lookAhead(0), ")")
                             }
-                            return Dummy(between(expr, lookAhead(0)))
+                            return Expr.Dummy(between(expr, lookAhead(0)))
                         }
                         args.add(innerExpr)
                         match(TokenType.COMMA) // 可选逗号
@@ -1170,7 +1170,7 @@ class Parser(
         } else if (check(TokenType.LPAREN)) {
             val lParen = next()
             val first = expression()
-            if (first is Dummy) return Dummy(between(lParen, first))
+            if (first is Expr.Dummy) return Expr.Dummy(between(lParen, first))
 
             // `(a, b, ...)`：元组字面量（多返回值就是元组，`return (1, "s")`）；
             // 没有逗号时保持 `(a)` 的分组语义
@@ -1180,7 +1180,7 @@ class Parser(
                 while (match(TokenType.COMMA)) {
                     if (check(TokenType.RPAREN)) break // 允许尾随逗号
                     val element = expression()
-                    if (element is Dummy) return Dummy(between(lParen, element))
+                    if (element is Expr.Dummy) return Expr.Dummy(between(lParen, element))
                     elements.add(element)
                 }
                 consume(TokenType.RPAREN)
@@ -1222,7 +1222,7 @@ class Parser(
         }
         error(bundle.format("diag.miss-expression", lookAhead(0).type))
             .label(lookAhead(0), "")
-        return Dummy(next().span)
+        return Expr.Dummy(next().span)
     }
 
     /**
@@ -1233,6 +1233,7 @@ class Parser(
      * 后者此前只消费名字、丢掉类型实参，于是 `-> Array<Int>` 被当成裸 `Array`（元素类型退化成未知）。
      */
     private fun identifierWithTypeArgs(id: Token): Expr.Identifier {
+        if (!check(TokenType.LESS)) return Expr.Identifier(id)
         val snapshot = createSnapshotWithDiagHandler()
         val result = generics()
         if (result == null) {
@@ -1241,122 +1242,117 @@ class Parser(
         }
         if (result.remaining != 0) {
             error(bundle.get("diag.redundant-gt"))
-                .label(prevToken.span.cutLast(result.remaining))
+                .label(prevToken.span.takeLast(result.remaining))
         }
-        if (result.args.size != 0) {
-            // 带类型实参的标识符：span 要覆盖到 `>`（即 `Option<Int>` 整体），
-            // 否则内层类型实参（`Int`）会落在注解 span 之外，诊断便无法收窄到它
-            return Expr.Identifier(between(id, prevToken, result.remaining), id, result.args)
-        }
-        return Expr.Identifier(id)
+        return Expr.Identifier(between(id, prevToken, result.remaining), id, result.args)
     }
 
     private data class TypeArgsResult(val args: Seq<Expr.Identifier>, val remaining: Int)
 
     /**
+     * 在`check(TokenType.LESS)`之后调用
      * @return `null` 解析失败，建议回溯；
      * `TypeArgsResult{ args = Seq(0), _ }` 无泛型或解析失败，无需回溯
      */
     private fun generics(): TypeArgsResult? {
-        if (match(TokenType.LESS)) {
-            val args = Seq<Expr.Identifier>(2)
-            var remaining = 0
-            while (true) {
-                // 优先使用剩下的结束符
-                if (remaining != 0) {
-                    remaining--
+        next()
+        val args = Seq<Expr.Identifier>(2)
+        var remaining = 0
+        while (true) {
+            // 优先使用剩下的结束符
+            if (remaining != 0) {
+                remaining--
+                return TypeArgsResult(args, remaining)
+            }
+            // 文件结束，建议回溯
+            if (isAtEnd) {
+                return null
+            }
+            // 正常结束并返回剩余的结束符
+            when {
+                match(TokenType.GREATER) ->
+                    return TypeArgsResult(args, remaining)
+
+                match(TokenType.SAR) -> {
+                    // >> 用掉一个剩一个
+                    remaining += 1
                     return TypeArgsResult(args, remaining)
                 }
-                // 文件结束，建议回溯
-                if (isAtEnd) {
-                    return null
+
+                match(TokenType.SHR) -> {
+                    // >>> 用掉一个剩两个
+                    remaining += 2
+                    return TypeArgsResult(args, remaining)
                 }
-                // 正常结束并返回剩余的结束符
+            }
+            if (check(TokenType.IDENTIFIER)) {
+                val id = next()
+
+                // 检查子泛型
+                if (check(TokenType.LESS)) {
+                    // 子泛型解析失败，本泛型同样失败
+                    val subArgs = generics() ?: return null
+                    // 与 identifier() 同理：span 覆盖到 `>`（`Option<Int>` 整体），
+                    // 多消耗的 `>`（`>>` 拆分）要切掉
+                    args.add(Expr.Identifier(between(id, prevToken, subArgs.remaining), id, subArgs.args))
+                    remaining += subArgs.remaining
+                } else {
+                    args.add(Expr.Identifier(id))
+                }
+                match(TokenType.COMMA)
+                continue
+            }
+            val parentId = prevToken
+            val afterParentId = lookAhead(0)
+            // 能恢复到结束符则报错并返回零个泛型，无需回溯
+            if (TokenType.RIGHT_ANGLE_BRACKETS.contains(
+                    recover(TokenType.RECOVERY + TokenType.RIGHT_ANGLE_BRACKETS - TokenType.RPAREN)
+                )
+            ) {
+                error(bundle.get("diag.miss-ident-as-type-param"))
+                    .label(between(parentId, prevToken))
                 when {
                     match(TokenType.GREATER) ->
-                        return TypeArgsResult(args, remaining)
+                        return TypeArgsResult(Seq(0), remaining)
 
                     match(TokenType.SAR) -> {
                         // >> 用掉一个剩一个
                         remaining += 1
-                        return TypeArgsResult(args, remaining)
+                        return TypeArgsResult(Seq(0), remaining)
                     }
 
                     match(TokenType.SHR) -> {
                         // >>> 用掉一个剩两个
                         remaining += 2
-                        return TypeArgsResult(args, remaining)
+                        return TypeArgsResult(Seq(0), remaining)
                     }
                 }
-                if (check(TokenType.IDENTIFIER)) {
-                    val id = next()
-                    val subArgs = generics()
-                    if (subArgs != null) {
-                        if (subArgs.args.size == 0) {
-                            args.add(Expr.Identifier(id))
-                        } else {
-                            // 与 identifier() 同理：span 覆盖到 `>`（`Option<Int>` 整体），
-                            // 多消耗的 `>`（`>>` 拆分）要切掉
-                            args.add(Expr.Identifier(between(id, prevToken, subArgs.remaining), id, subArgs.args))
-                        }
-                        remaining += subArgs.remaining
-                        match(TokenType.COMMA)
-                        continue
-                    }
-                    // 子泛型解析失败，本泛型同样失败
-                    return null
-                }
-                val parentId = prevToken
-                val afterParentId = lookAhead(0)
-                // 能恢复到结束符则报错并返回零个泛型，无需回溯
-                if (TokenType.RIGHT_ANGLE_BRACKETS.contains(
-                        recover(TokenType.RECOVERY + TokenType.RIGHT_ANGLE_BRACKETS - TokenType.RPAREN)
-                    )
-                ) {
-                    error(bundle.get("diag.miss-ident-as-type-param"))
-                        .label(between(parentId, prevToken))
-                    when {
-                        match(TokenType.GREATER) ->
-                            return TypeArgsResult(Seq(0), remaining)
-
-                        match(TokenType.SAR) -> {
-                            // >> 用掉一个剩一个
-                            remaining += 1
-                            return TypeArgsResult(Seq(0), remaining)
-                        }
-
-                        match(TokenType.SHR) -> {
-                            // >>> 用掉一个剩两个
-                            remaining += 2
-                            return TypeArgsResult(Seq(0), remaining)
-                        }
-                    }
-                }
-                // 失败后选择不回溯则保留的错误诊断
-                error(bundle.get("diag.miss-type-param-end")).apply {
-                    label(between(afterParentId, prevToken))
-                    help(bundle.get("diag.miss-type-param-end.help"))
-                        .insert(afterParentId, ">")
-                }
-                // 失败，建议回溯
-                return null
             }
+            // 失败后选择不回溯则保留的错误诊断
+            error(bundle.get("diag.miss-type-param-end")).apply {
+                label(between(afterParentId, prevToken))
+                help(bundle.get("diag.miss-type-param-end.help"))
+                    .insert(afterParentId, ">")
+            }
+            // 失败，建议回溯
+            return null
         }
-        // 无泛型参数
-        return TypeArgsResult(Seq(0), 0)
     }
 
     /**
-     * 传入[TokenType.IDENTIFIER]/[TokenType.LITERALS]后尝试解析类型注解，
+     * 传入[TokenType.IDENTIFIER]后尝试解析类型注解，
      * 失败则返回[subject]
      * @param subject 已被消耗的[TokenType.IDENTIFIER]/[TokenType.LITERALS]
      */
-    private fun annotation(subject: Expr): Expr {
+    private fun annotation(subject: Expr.Identifier): Expr {
         // id :
         if (!isStmtEnd && check(TokenType.COLON)) {
             val colon = next()
-            val enums = anonymousEnum() ?: return Dummy(between(colon, prevToken))
-
+            if (subject.typeArgs != null) {
+                error(bundle.get("diag.unexpected-generic-type-in-annotation"))
+                    .label(subject.span.takeLast(subject.span.len() - subject.token.span.len()))
+            }
+            val enums = anonymousEnum() ?: return Expr.Dummy(between(colon, prevToken))
             if (!enums.isEmpty) return Expr.Annotation(subject, enums)
             // 如果标注数量为0，视作Identifier
         }
@@ -1379,14 +1375,14 @@ class Parser(
         while (!isAtEnd) {
             if (check(TokenType.LPAREN)) {
                 val tuple = tuple()
-                if (tuple is Dummy) {
+                if (tuple is Expr.Dummy) {
                     hasError = true
                 } else if (!hasError) {
                     enums.add(tuple)
                 }
             } else {
                 val id = identifier()
-                if (id is Dummy) {
+                if (id is Expr.Dummy) {
                     hasError = true
                 } else if (!hasError) {
                     enums.add(id)
@@ -1423,13 +1419,13 @@ class Parser(
             }
         )
 //         TODO style提示
-        if (hasError) return Dummy(between(lParen, prevToken))
+        if (hasError) return Expr.Dummy(between(lParen, prevToken))
         return Expr.Tuple(between(lParen, prevToken), elements)
     }
 
     /**
      * 解析一组连续表达式序列
-     * @param elementProv 解析并返回一个序列元素，无法解析时请返回[Dummy]/`null`以调用恢复，务必消耗元素，否则死循环
+     * @param elementProv 解析并返回一个序列元素，无法解析时请返回[Expr.Dummy]/`null`以调用恢复，务必消耗元素，否则死循环
      * @param separators 分隔符，方法内已有自带的分隔符[matchStmtEnd]，可填`setOf()`以作空格
      * @param isSeparatorOptional 是否允许省略分隔符
      * @param missSeparator 当`expect(end)`失败时使用missSeparator报错
@@ -1450,7 +1446,7 @@ class Parser(
         while (!check(end)) {
             val snapshot = createSnapshot()
             val element = elementProv.get()
-            if (element == null || element is Dummy) {
+            if (element == null || element is Expr.Dummy) {
                 restoreSnapshot(snapshot)
             } else {
                 // 成功解析元素
