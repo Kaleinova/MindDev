@@ -2141,6 +2141,8 @@ class TypeInferencer(val context: CompilerContext) {
      * - 其它 → 报"不接受类型实参"。
      */
     private fun typeArgToType(expr: Expr.Identifier): Type {
+        if(expr.defId == null) return Type.Dummy
+
         val symbol = expr.defId?.let { symbolTable.get(it) }
         val nestedArgs = expr.typeArgs
         if (nestedArgs != null && !nestedArgs.isEmpty) {
