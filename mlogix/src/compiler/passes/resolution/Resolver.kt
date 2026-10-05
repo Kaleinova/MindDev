@@ -716,7 +716,7 @@ class Resolver(private val context: CompilerContext) {
      * （靠 [currentStructDefId] 认出「这个名字是当前结构体的字段」）。
      */
     private fun resolveMethodStmt(method: Stmt.Fn, structScope: Scope, structDefId: DefId?) {
-        val zeroWidth = Span(method.span.index(), method.span.start(), 0)
+        val zeroWidth = Span(method.span.index, method.span.start, 0)
         // `params` 是 val 属性，只能就地改动它的内容（Parser 给的是可变的 Seq）。
         // 写成 `fn m { }`（连括号都没有）时参数为 null：那本来就不是合法的方法形参列表，
         // 交给调用处的「参数数量不匹配」报，这里不额外造一个空列表掩盖问题

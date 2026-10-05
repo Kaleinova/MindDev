@@ -220,8 +220,8 @@ class TypeSolver(private val problems: DiagHandler, private val sourceFile: Sour
     private fun narrow(origin: TypeOrigin?, fallback: Span?): Span? {
         val span = origin?.span ?: return fallback
         if (fallback == null) return span
-        if (span.index() != fallback.index()) return fallback
-        if (span.start() >= fallback.start() && span.end() <= fallback.end()) return span
+        if (span.index != fallback.index) return fallback
+        if (span.start >= fallback.start && span.end <= fallback.end) return span
         return fallback
     }
 

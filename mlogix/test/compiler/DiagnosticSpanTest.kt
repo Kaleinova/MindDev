@@ -59,7 +59,7 @@ class DiagnosticSpanTest {
         assertEquals(declText, textOf(source, error.labels[1].span), "声明方 label")
     }
 
-    private fun textOf(source: String, span: Span): String = source.substring(span.start(), span.end())
+    private fun textOf(source: String, span: Span): String = source.substring(span.start, span.end)
 
     // ========== 显式类型实参数量不匹配：label 与 note ==========
 

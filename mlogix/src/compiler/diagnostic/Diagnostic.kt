@@ -136,13 +136,13 @@ abstract class Diagnostic(
             if (!labels.isEmpty) {// 按文件分组（主标签所在文件在最前）
                 val groups = groupByFile(labels)
                 primary = labels[0]
-                primaryFile = sourceMap.getSourceFile(primary.span.index())
+                primaryFile = sourceMap.getSourceFile(primary.span.index)
                 if (primaryFile != null) {
                     append(renderSnippet(primaryFile, groups[0], "-->", maxLineStrLen))
                 }
 
                 for (secondary in groups.iterator().also { it.next() }) {
-                    val secondaryFile = sourceMap.getSourceFile(secondary.first().span.index()) ?: continue
+                    val secondaryFile = sourceMap.getSourceFile(secondary.first().span.index) ?: continue
                     append(renderSnippet(secondaryFile, secondary, ":::", maxLineStrLen))
                 }
             }
@@ -152,7 +152,7 @@ abstract class Diagnostic(
                     renderSuggestion(
                         sourceMap,
                         suggestion,
-                        primaryFile?.getLine(primary!!.span.start()) ?: -1,
+                        primaryFile?.getLine(primary!!.span.start) ?: -1,
                         maxLineStrLen,
                     )
                 )
@@ -166,15 +166,15 @@ abstract class Diagnostic(
     private fun renderSnippet(file: SourceFile, labels: Seq<Label>, fileMark: String, maxLineStrLen: Int): String {
         return buildString {
             val primary = labels[0]
-            val lineNumStr = (file.getLine(primary.span.start()) + 1).toString()
-            val colStr = (file.getCol(primary.span.start()) + 1).toString()
+            val lineNumStr = (file.getLine(primary.span.start) + 1).toString()
+            val colStr = (file.getCol(primary.span.start) + 1).toString()
             append(" ".repeat(maxLineStrLen))
             append("$fileMark ${file.relativePath}:$lineNumStr:$colStr\n")
 
             labels.sort(Comparator { a, b ->
-                val lineDiff = file.getLine(a.span.start()) - file.getLine(b.span.start())
+                val lineDiff = file.getLine(a.span.start) - file.getLine(b.span.start)
                 if (lineDiff != 0) lineDiff
-                else file.getCol(a.span.start()) - file.getCol(b.span.start())
+                else file.getCol(a.span.start) - file.getCol(b.span.start)
             })
 
             append("${renderBlank(maxLineStrLen)}\n")
@@ -182,9 +182,9 @@ abstract class Diagnostic(
             var index = 0
             var lastLine = -1
             while (index < labels.size) {
-                val line = file.getLine(labels.get(index).span.start())
+                val line = file.getLine(labels.get(index).span.start)
                 val lineLabels = Seq<Label>(2)
-                while (index < labels.size && file.getLine(labels.get(index).span.start()) == line) {
+                while (index < labels.size && file.getLine(labels.get(index).span.start) == line) {
                     lineLabels.add(labels.get(index))
                     index++
                 }
@@ -243,7 +243,7 @@ abstract class Diagnostic(
             val cols = IntSeq(originalLabels.size)
             val lens = IntSeq(originalLabels.size)
             for (label in originalLabels) {
-                cols.add(file.getDisplayCol(label.span.start()))
+                cols.add(file.getDisplayCol(label.span.start))
                 lens.add(markLen(file, label.span))
             }
 
@@ -376,13 +376,13 @@ abstract class Diagnostic(
         maxLineStrLen: Int
     ) {
         val primary = suggestion.labels[0]
-        val primaryFile = map.getSourceFile(primary.span.index())
+        val primaryFile = map.getSourceFile(primary.span.index)
         if (primaryFile != null) {
             append(renderSnippet(primaryFile, groups[0], "-->", maxLineStrLen))
         }
 
         for (secondary in groups.iterator().also { it.next() }) {
-            val secondaryFile = map.getSourceFile(secondary.first().span.index()) ?: continue
+            val secondaryFile = map.getSourceFile(secondary.first().span.index) ?: continue
             append(renderSnippet(secondaryFile, secondary, ":::", maxLineStrLen))
         }
     }
@@ -395,9 +395,9 @@ abstract class Diagnostic(
     ) {
         for (labels in groups) {
             for (label in labels) {
-                val file = map.getSourceFile(label.span.index()) ?: continue
-                val line = file.getLine(label.span.start())
-                val col = file.getCol(label.span.start())
+                val file = map.getSourceFile(label.span.index) ?: continue
+                val line = file.getLine(label.span.start)
+                val col = file.getCol(label.span.start)
                 val lineNumStr = (line + 1).toString()
                 if (line != primaryLine) {
                     val colStr = (col + 1).toString()
@@ -458,13 +458,13 @@ abstract class Diagnostic(
     private fun maxLineStrLen(map: SourceMap, labels: Seq<Label>, suggestions: Seq<Suggestion>): Int {
         var len = 1
         for (label in labels) {
-            val sourceFile = map.getSourceFile(label.span.index()) ?: continue
-            len = max(len, (sourceFile.getLine(label.span.end()) + 1).toString().length)
+            val sourceFile = map.getSourceFile(label.span.index) ?: continue
+            len = max(len, (sourceFile.getLine(label.span.end) + 1).toString().length)
         }
         for (suggestion in suggestions) {
             for (label in suggestion.labels) {
-                val sourceFile = map.getSourceFile(label.span.index()) ?: continue
-                len = max(len, (sourceFile.getLine(label.span.end()) + 1).toString().length)
+                val sourceFile = map.getSourceFile(label.span.index) ?: continue
+                len = max(len, (sourceFile.getLine(label.span.end) + 1).toString().length)
             }
         }
         return len
@@ -475,7 +475,7 @@ abstract class Diagnostic(
         val groups = Seq<Seq<Label>>(1)
         val groupIndexByFile = IntIntMap(2)
         for (label in labels) {
-            val fileIndex = label.span.index()
+            val fileIndex = label.span.index
             val groupIndex = groupIndexByFile.get(fileIndex, -1)
             if (groupIndex == -1) {
                 groupIndexByFile.put(fileIndex, groups.size)
@@ -491,11 +491,11 @@ abstract class Diagnostic(
 
     /** 计算标签下划线长度（按字符列，至少 1；多行 span 截断到主标签所在行） */
     private fun markLen(file: SourceFile, span: Span): Int {
-        val start = span.start()
+        val start = span.start
         val line = file.getLine(start)
         val lineStart = start - file.getCol(start)
         val lineEnd = lineStart + file.getLineString(line).length
-        val end = min(span.end(), lineEnd)
+        val end = min(span.end, lineEnd)
         return max(1, end - start)
     }
 }

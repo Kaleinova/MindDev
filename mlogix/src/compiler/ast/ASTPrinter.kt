@@ -62,8 +62,8 @@ object ASTPrinter {
 
     private fun printNode(node: Spanned, indent: String?, isLast: Boolean, color: String?) {
         // 打印节点类型名称
-        val start = node.span().start()
-        val end = max(node.span().end(), start)
+        val start = node.span().start
+        val end = max(node.span().end, start)
 
         val startLine = sourceFile.getLine(start)
         val endLine = sourceFile.getLine(end)

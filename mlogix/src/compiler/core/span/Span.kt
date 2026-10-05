@@ -12,13 +12,13 @@ class Span : Spanned {
         }
 
         fun between(from: Spanned, to: Spanned): Span {
-            require(from.span().index() == to.span().index()) {
+            require(from.span().index == to.span().index) {
                 "不能使用index不同的Span: Span.between(${from.span()},${to.span()})"
             }
             return between(
-                from.span().index(),
-                from.span().start(),
-                to.span().end(),
+                from.span().index,
+                from.span().start,
+                to.span().end,
             )
         }
     }
@@ -34,32 +34,28 @@ class Span : Spanned {
     override fun span(): Span = this
 
     /** 所在文件的索引 */
-    fun index(): Int {
-        return (bits ushr (START_BITS + LEN_BITS)).toInt()
-    }
+    val index: Int
+        get() = (bits ushr (START_BITS + LEN_BITS)).toInt()
 
     /** 在文件中左端的字符位置 */
-    fun start(): Int {
-        return ((bits ushr LEN_BITS) and 0x1FF_FFFF).toInt()
-    }
+    val start: Int
+        get() = ((bits ushr LEN_BITS) and 0x1FF_FFFF).toInt()
 
     /** 长度 */
-    fun len(): Int {
-        return (bits and 0x1F_FFFF).toInt()
-    }
+    val len: Int
+        get() = (bits and 0x1F_FFFF).toInt()
 
     /** 在文件中右端的字符位置 */
-    fun end(): Int {
-        return start() + len()
-    }
+    val end: Int
+        get() = start + len
 
     /** 截取末尾部分 */
-    fun takeLast(len: Int): Span {
-        if (len > len()) return this
-        return Span(index(), end() - len, len)
+    fun takeLast(takeLen: Int): Span {
+        if (takeLen > len) return this
+        return Span(index, end - takeLen, takeLen)
     }
 
-    override fun toString(): String = "Span{${index()},${start()},${len()}}"
+    override fun toString(): String = "Span{${index},${start},${len}}"
 
     /**
      * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[bits],[index],[start]和[len]属性

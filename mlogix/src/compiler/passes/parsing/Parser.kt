@@ -308,13 +308,13 @@ class Parser(
                     .label(lookAhead(0), bundle.get("diag.current"))
                 return args
             }
-            val before = lookAhead(0).span.start()
+            val before = lookAhead(0).span.start
             val arg = pattern()
             if (arg != null) args.add(arg)
             // 分隔符：`,` / 换行 / 空格皆可；若这一轮没有推进，强制推进一格防止死循环
             match(TokenType.COMMA)
             matchStmtEnd()
-            if (lookAhead(0).span.start() == before && !check(TokenType.RPAREN)) next()
+            if (lookAhead(0).span.start == before && !check(TokenType.RPAREN)) next()
         }
     }
 
@@ -1238,7 +1238,7 @@ class Parser(
         val result = generics()
         if (result == null) {
             restoreSnapshot(snapshot)
-            return Expr.Identifier(id)
+            return Expr.Identifier(id.span, id, Seq(0))
         }
         if (result.remaining != 0) {
             error(bundle.get("diag.redundant-gt"))
@@ -1350,7 +1350,7 @@ class Parser(
             val colon = next()
             if (subject.typeArgs != null) {
                 error(bundle.get("diag.unexpected-generic-type-in-annotation"))
-                    .label(subject.span.takeLast(subject.span.len() - subject.token.span.len()))
+                    .label(subject.span.takeLast(subject.span.len - subject.token.span.len))
             }
             val enums = anonymousEnum() ?: return Expr.Dummy(between(colon, prevToken))
             if (!enums.isEmpty) return Expr.Annotation(subject, enums)
@@ -1807,7 +1807,7 @@ class Parser(
      * @param to 末尾
      */
     private fun between(from: Spanned, to: Spanned, dropTail: Int = 0): Span {
-        return Span.between(sourceFile.index, from.span().start(), to.span().end() - dropTail)
+        return Span.between(sourceFile.index, from.span().start, to.span().end - dropTail)
     }
 
     /** 将复合赋值运算符token拆分 */

@@ -71,7 +71,7 @@ class ReturnTest {
     }
 
     /** 源文件里 [span] 覆盖的原文（用于断言 label 落在哪个片段上） */
-    private fun textOf(source: String, span: Span): String = source.substring(span.start(), span.end())
+    private fun textOf(source: String, span: Span): String = source.substring(span.start, span.end)
 
     /** `(T1, T2, ...)` */
     private fun tupleOf(vararg elements: Type): Type = Type.TupleType(Seq.with(*elements))
