@@ -226,7 +226,7 @@ class Resolver(private val context: CompilerContext) {
         val name = (typeParam.token.literal as? String) ?: typeParam.token.type.toString()
         // TODO: 支持高阶类型（类型构造器作为类型参数）后移除这段诊断。
         //  届时 `E<U>` 中的 U 应作为 E 的形参绑定到独立作用。
-        if (typeParam.typeArgs != null && !typeParam.typeArgs.isEmpty) {
+        if (typeParam.generics != null && !typeParam.generics.isEmpty) {
             error(bundle.format("diag.hkt-not-supported", name))
                 .label(typeParam, bundle.get("diag.hkt-not-supported.help"))
         }
@@ -284,7 +284,7 @@ class Resolver(private val context: CompilerContext) {
             // 类型应写在注解里（`set var : Foo<Int>`）
             // TODO: 若未来支持 Rust turbofish 风格的泛型函数引用赋值（`set f = id<Int>`），
             //  只允许 RHS 携带类型实参，LHS 依旧不允许
-            if (ident.typeArgs != null && !ident.typeArgs.isEmpty) {
+            if (ident.generics != null && !ident.generics.isEmpty) {
                 error(bundle.get("diag.var-with-type-args"))
                     .label(ident, bundle.get("diag.var-with-type-args.help"))
             }
@@ -433,7 +433,7 @@ class Resolver(private val context: CompilerContext) {
                     expr.defId = defId
                 }
                 // 值位置携带的类型实参（`foo<Int>`、`id<Array<Str>>`）是类型名，按类型名解析
-                expr.typeArgs?.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
+                expr.generics?.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
             }
 
             is Expr.SelfRef -> {
@@ -566,7 +566,7 @@ class Resolver(private val context: CompilerContext) {
             val name = (expr.token.literal as? String) ?: expr.token.type.toString()
             scope.lookup(name)?.let { expr.defId = it }
             // 值位置携带的类型实参（`Point<Int>`）是类型名
-            expr.typeArgs?.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
+            expr.generics?.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
             return
         }
         resolveExpr(expr, scope)
@@ -582,7 +582,7 @@ class Resolver(private val context: CompilerContext) {
     private fun resolveStructMemberAccess(expr: Expr.Get, structSymbol: Symbol, scope: Scope) {
         val objIdent = expr.obj as? Expr.Identifier
         objIdent?.defId = structSymbol.id
-        objIdent?.typeArgs?.let { args ->
+        objIdent?.generics?.let { args ->
             for (arg in args) resolveAnnotationNames(arg, scope)
         }
 
@@ -807,7 +807,7 @@ class Resolver(private val context: CompilerContext) {
         val objIdent = expr.obj as? Expr.Identifier
         objIdent?.defId = enumSymbol.id
         // `Option<Int>.Some`：显式类型实参是类型名，按类型名解析
-        objIdent?.typeArgs?.let { args ->
+        objIdent?.generics?.let { args ->
             for (arg in args) resolveAnnotationNames(arg, scope)
         }
 
@@ -859,7 +859,7 @@ class Resolver(private val context: CompilerContext) {
                     expr.defId = defId
                 }
                 // 递归解析类型实参（`Array<Int>` 中的 `Int`、`Array<Array<T>>` 中的内层 `Array`/`T`）
-                expr.typeArgs?.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
+                expr.generics?.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
             }
 
             is Expr.Annotation -> {

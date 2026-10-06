@@ -974,8 +974,8 @@ class TypeInferencer(val context: CompilerContext) {
         }
         // 泛型函数（或值位置携带显式类型实参）：按调用点实例化类型方案，
         // 每次引用得到独立的类型变量（多态）。
-        val explicitArgs = expr.typeArgs
-        val hasExplicit = explicitArgs != null && !explicitArgs.isEmpty
+        val explicitGenerics = expr.generics
+        val hasExplicit = explicitGenerics != null && !explicitGenerics.isEmpty
         val declaredCount = symbol.values.get(Symbol.TYPE_PARAM_COUNT_KEY) as? Int ?: 0
         if (!symbol.typeScheme.typeVars.isEmpty || declaredCount != 0 || hasExplicit) {
             return InferResult(instantiateScheme(symbol, expr, declaredCount), Seq(0), origin)
@@ -1367,7 +1367,7 @@ class TypeInferencer(val context: CompilerContext) {
         structSymbol: Symbol,
         expected: ExpectedType?,
     ): InferResult {
-        val explicitArgs = (call.callee as? Expr.Identifier)?.typeArgs
+        val explicitArgs = (call.callee as? Expr.Identifier)?.generics
         val constructorType = instantiateScheme(
             structSymbol,
             call.callee as Expr.Identifier,
@@ -1542,7 +1542,7 @@ class TypeInferencer(val context: CompilerContext) {
         val structSymbol = member.values.get(Symbol.STRUCT_METHOD_OWNER_KEY) as? Symbol
             ?: return InferResult(BuiltinType.Dummy, combined)
 
-        val explicitArgs = (memberGet.field as? Expr.Identifier)?.typeArgs
+        val explicitArgs = (memberGet.field as? Expr.Identifier)?.generics
         if (explicitArgs != null && !explicitArgs.isEmpty) {
             error(bundle.get("diag.method-type-args-not-supported"))
                 .label(memberGet.field, "")
@@ -1639,7 +1639,7 @@ class TypeInferencer(val context: CompilerContext) {
         variantSymbol: Symbol,
         expected: ExpectedType?,
     ): InferResult {
-        val explicitArgs = (call.callee as? Expr.Get)?.let { (it.obj as? Expr.Identifier)?.typeArgs }
+        val explicitArgs = (call.callee as? Expr.Get)?.let { (it.obj as? Expr.Identifier)?.generics }
         val constructorType = instantiateVariant(variantSymbol, call.callee, explicitArgs)
         val payloadTypes = (constructorType as? Type.Func)?.params ?: Seq<Type>(0)
         val enumType = (constructorType as? Type.Func)?.result ?: constructorType
@@ -1999,7 +1999,7 @@ class TypeInferencer(val context: CompilerContext) {
                 // `枚举名.变体`：变体访问；单元变体得到枚举类型，带载荷变体得到构造器函数
                 val variantSymbol = enumVariantSymbolOf(expr)
                 if (variantSymbol != null) {
-                    val explicitArgs = (expr.obj as? Expr.Identifier)?.typeArgs
+                    val explicitArgs = (expr.obj as? Expr.Identifier)?.generics
                     return InferResult(instantiateVariant(variantSymbol, expr, explicitArgs), Seq(0))
                 }
                 // `枚举名.xxx` 中 xxx 不是变体：Resolver 已报「没有这个变体」，这里静默降级
@@ -2121,7 +2121,7 @@ class TypeInferencer(val context: CompilerContext) {
      * 下钻时子项越界 → 求解器退化为根 span，即 `Array` 本身。
      */
     private fun identifierOrigin(expr: Expr.Identifier): TypeOrigin {
-        val args = expr.typeArgs
+        val args = expr.generics
         if (args == null || args.isEmpty) return TypeOrigin(expr.span)
         return TypeOrigin(expr.span, args.map { identifierOrigin(it) })
     }
@@ -2144,7 +2144,7 @@ class TypeInferencer(val context: CompilerContext) {
         if(expr.defId == null) return Type.Dummy
 
         val symbol = expr.defId?.let { symbolTable.get(it) }
-        val nestedArgs = expr.typeArgs
+        val nestedArgs = expr.generics
         if (nestedArgs != null && !nestedArgs.isEmpty) {
             // 嵌套应用 `Head<Args...>`
             if (symbol?.values?.get(Symbol.TYPE_PARAM_KEY) == true) {
@@ -2280,7 +2280,7 @@ class TypeInferencer(val context: CompilerContext) {
      *   scheme 求解后可能并入额外的泛化变量，显式实参只对声明的参数计数）
      */
     private fun instantiateScheme(symbol: Symbol, expr: Expr.Identifier, declaredCount: Int): Type {
-        val explicitArgs = expr.typeArgs
+        val explicitArgs = expr.generics
         val argCount = explicitArgs?.size ?: 0
         if (argCount != 0 && argCount != declaredCount) {
             val diagnostic = error(bundle.format("diag.explicit-type-arg-count", declaredCount, argCount))

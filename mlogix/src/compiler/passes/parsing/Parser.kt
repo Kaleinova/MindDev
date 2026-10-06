@@ -476,8 +476,8 @@ class Parser(
                         consume(TokenType.IDENTIFIER) {
                             error(bundle.get("diag.miss-ident-as-result")).label(lookAhead(0))
                         }?.let {
-                            // 名字后可以跟类型实参（`-> Array<Int>`）；写法与类型注解里的类型表达式一致
-                            val expr = annotation(identifierWithTypeArgs(it))
+                            // 名字后可以跟类型参数（`-> Array<Int>`）；写法与类型注解里的类型表达式一致
+                            val expr = annotation(identifierWithGenerics(it))
                             isSeparatorOptional = expr !is Expr.Annotation
                             return@let expr
                         }
@@ -1218,7 +1218,7 @@ class Parser(
     private fun identifier(): Expr {
         if (check(TokenType.IDENTIFIER)) {
             val id = next()
-            return identifierWithTypeArgs(id)
+            return identifierWithGenerics(id)
         }
         error(bundle.format("diag.miss-expression", lookAhead(0).type))
             .label(lookAhead(0), "")
@@ -1226,13 +1226,13 @@ class Parser(
     }
 
     /**
-     * 已消耗名字 token 后，尝试把紧随其后的类型实参（`Array<Int>`、`Option<Option<Int>>`）
+     * 已消耗名字 token 后，尝试把紧随其后的类型参数（`Array<Int>`、`Option<Option<Int>>`）
      * 挂到这个标识符上；没有 `<...>` 时就是裸标识符。
      *
      * 供表达式/类型表达式（[identifier]）与**裸写返回值类型**（`-> Array<Int>`）共用：
-     * 后者此前只消费名字、丢掉类型实参，于是 `-> Array<Int>` 被当成裸 `Array`（元素类型退化成未知）。
+     * 后者此前只消费名字、丢掉类型参数，于是 `-> Array<Int>` 被当成裸 `Array`（元素类型退化成未知）。
      */
-    private fun identifierWithTypeArgs(id: Token): Expr.Identifier {
+    private fun identifierWithGenerics(id: Token): Expr.Identifier {
         if (!check(TokenType.LESS)) return Expr.Identifier(id)
         val snapshot = createSnapshotWithDiagHandler()
         val result = generics()
@@ -1247,14 +1247,14 @@ class Parser(
         return Expr.Identifier(between(id, prevToken, result.remaining), id, result.args)
     }
 
-    private data class TypeArgsResult(val args: Seq<Expr.Identifier>, val remaining: Int)
+    private data class GenericsResult(val args: Seq<Expr.Identifier>, val remaining: Int)
 
     /**
      * 在`check(TokenType.LESS)`之后调用
      * @return `null` 解析失败，建议回溯；
-     * `TypeArgsResult{ args = Seq(0), _ }` 无泛型或解析失败，无需回溯
+     * `GenericsResult{ args = Seq(0), _ }` 无泛型或解析失败，无需回溯
      */
-    private fun generics(): TypeArgsResult? {
+    private fun generics(): GenericsResult? {
         next()
         val args = Seq<Expr.Identifier>(2)
         var remaining = 0
@@ -1262,7 +1262,7 @@ class Parser(
             // 优先使用剩下的结束符
             if (remaining != 0) {
                 remaining--
-                return TypeArgsResult(args, remaining)
+                return GenericsResult(args, remaining)
             }
             // 文件结束，建议回溯
             if (isAtEnd) {
@@ -1271,18 +1271,18 @@ class Parser(
             // 正常结束并返回剩余的结束符
             when {
                 match(TokenType.GREATER) ->
-                    return TypeArgsResult(args, remaining)
+                    return GenericsResult(args, remaining)
 
                 match(TokenType.SAR) -> {
                     // >> 用掉一个剩一个
                     remaining += 1
-                    return TypeArgsResult(args, remaining)
+                    return GenericsResult(args, remaining)
                 }
 
                 match(TokenType.SHR) -> {
                     // >>> 用掉一个剩两个
                     remaining += 2
-                    return TypeArgsResult(args, remaining)
+                    return GenericsResult(args, remaining)
                 }
             }
             if (check(TokenType.IDENTIFIER)) {
@@ -1291,11 +1291,11 @@ class Parser(
                 // 检查子泛型
                 if (check(TokenType.LESS)) {
                     // 子泛型解析失败，本泛型同样失败
-                    val subArgs = generics() ?: return null
+                    val subGenerics = generics() ?: return null
                     // 与 identifier() 同理：span 覆盖到 `>`（`Option<Int>` 整体），
                     // 多消耗的 `>`（`>>` 拆分）要切掉
-                    args.add(Expr.Identifier(between(id, prevToken, subArgs.remaining), id, subArgs.args))
-                    remaining += subArgs.remaining
+                    args.add(Expr.Identifier(between(id, prevToken, subGenerics.remaining), id, subGenerics.args))
+                    remaining += subGenerics.remaining
                 } else {
                     args.add(Expr.Identifier(id))
                 }
@@ -1313,18 +1313,18 @@ class Parser(
                     .label(between(parentId, prevToken))
                 when {
                     match(TokenType.GREATER) ->
-                        return TypeArgsResult(Seq(0), remaining)
+                        return GenericsResult(Seq(0), remaining)
 
                     match(TokenType.SAR) -> {
                         // >> 用掉一个剩一个
                         remaining += 1
-                        return TypeArgsResult(Seq(0), remaining)
+                        return GenericsResult(Seq(0), remaining)
                     }
 
                     match(TokenType.SHR) -> {
                         // >>> 用掉一个剩两个
                         remaining += 2
-                        return TypeArgsResult(Seq(0), remaining)
+                        return GenericsResult(Seq(0), remaining)
                     }
                 }
             }
@@ -1348,7 +1348,7 @@ class Parser(
         // id :
         if (!isStmtEnd && check(TokenType.COLON)) {
             val colon = next()
-            if (subject.typeArgs != null) {
+            if (subject.generics != null) {
                 error(bundle.get("diag.unexpected-generic-type-in-annotation"))
                     .label(subject.span.takeLast(subject.span.len - subject.token.span.len))
             }
