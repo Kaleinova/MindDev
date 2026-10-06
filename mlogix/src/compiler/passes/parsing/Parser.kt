@@ -1249,8 +1249,12 @@ class Parser(
     inner class GenericsResult(val args: Seq<Expr.Identifier>, val remaining: Int) {
         fun checkRemaining() {
             if (remaining != 0) {
-                error(bundle.get("diag.redundant-gt"))
-                    .label(prevToken.span.takeLast(remaining))
+                val span = prevToken.span.takeLast(remaining)
+                error(bundle.get("diag.redundant-gt")).apply {
+                    label(span)
+                    help(bundle.get("diag.redundant-gt.help"))
+                        .insert(span, " ")
+                }
             }
         }
     }
