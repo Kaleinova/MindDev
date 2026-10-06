@@ -81,8 +81,9 @@ class Parser(
     private fun useStmt(): Stmt? {
         val start = next() // consume 'use'
         val item = useItem() ?: return null
-        if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-        return Stmt.Use(between(start, item), item)
+        val useStmt = Stmt.Use(between(start, item), item)
+        if (!consumeStmtEnd(useStmt)) recoverByTokenTree(TokenType.RECOVERY)
+        return useStmt
     }
 
     private fun useItem(): Stmt.Use.UseItem? {
@@ -508,24 +509,27 @@ class Parser(
         val start = next()
         if (matchStmtEnd()) return Stmt.Break(start.span, null)
         val flag = consume(TokenType.IDENTIFIER) ?: return Stmt.Break(start.span, null)
-        if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-        return Stmt.Break(between(start, flag), Expr.Identifier(flag))
+        val breakStmt = Stmt.Break(between(start, flag), Expr.Identifier(flag))
+        if (!consumeStmtEnd(breakStmt)) recoverByTokenTree(TokenType.RECOVERY)
+        return breakStmt
     }
 
     private fun continueStmt(): Stmt {
         val start = next()
         if (matchStmtEnd()) return Stmt.Continue(start.span, null)
         val flag = consume(TokenType.IDENTIFIER) ?: return Stmt.Continue(start.span, null)
-        if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-        return Stmt.Continue(between(start, flag), Expr.Identifier(flag))
+        val continueStmt = Stmt.Continue(between(start, flag), Expr.Identifier(flag))
+        if (!consumeStmtEnd(continueStmt)) recoverByTokenTree(TokenType.RECOVERY)
+        return continueStmt
     }
 
     private fun returnStmt(): Stmt {
         val start = next()
         if (matchStmtEnd()) return Stmt.Return(start.span, null)
         val expr = expression()
-        if (expr is Expr.Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-        return Stmt.Return(between(start, expr), expr)
+        val returnStmt = Stmt.Return(between(start, expr), expr)
+        if (expr is Expr.Dummy || !consumeStmtEnd(returnStmt)) recoverByTokenTree(TokenType.RECOVERY)
+        return returnStmt
     }
 
     private fun setStmt(): Stmt? {
@@ -551,11 +555,15 @@ class Parser(
 
         val assignStmt = assignStmt(expr)
         if (assignStmt == null) {
-            if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-            return Stmt.SetVar(between(start, expr), expr, null)
+            val setVarStmt = Stmt.SetVar(between(start, expr), expr, null)
+            if (!consumeStmtEnd(setVarStmt)) recoverByTokenTree(TokenType.RECOVERY)
+            return setVarStmt
         } else {
-            if (assignStmt.value is Expr.Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-            return Stmt.SetVar(between(start, assignStmt), expr, assignStmt)
+            val setVarStmt = Stmt.SetVar(between(start, assignStmt), expr, assignStmt)
+            if (assignStmt.value is Expr.Dummy || !consumeStmtEnd(setVarStmt)) {
+                recoverByTokenTree(TokenType.RECOVERY)
+            }
+            return setVarStmt
         }
     }
 
@@ -858,10 +866,13 @@ class Parser(
         val assignStmt = assignStmt(expr)
 
         if (assignStmt == null) {
-            if (!consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
-            return Stmt.ExprStmt(expr.span, expr)
+            val exprStmt = Stmt.ExprStmt(expr.span, expr)
+            if (!consumeStmtEnd(exprStmt)) recoverByTokenTree(TokenType.RECOVERY)
+            return exprStmt
         } else {
-            if (assignStmt.value is Expr.Dummy || !consumeStmtEnd()) recoverByTokenTree(TokenType.RECOVERY)
+            if (assignStmt.value is Expr.Dummy || !consumeStmtEnd(assignStmt)) {
+                recoverByTokenTree(TokenType.RECOVERY)
+            }
             return assignStmt
         }
     }
@@ -1688,12 +1699,18 @@ class Parser(
      * 检查 ; \n EOF 作为语句结束符，推进；
      * 检查 { } 作为语句结束符，不推进；
      * 都没有则报错。
+     *
+     * @param stmt 需要匹配结束符的语句
      */
-    private fun consumeStmtEnd(): Boolean {
+    private fun consumeStmtEnd(stmt: Stmt? = null): Boolean {
         if (matchStmtEnd()) return true
         // 如果没有找到，报告错误
-        error(bundle.get("diag.miss-stmt-end"))
-            .label(lookAhead(0), "")
+        error(bundle.get("diag.miss-stmt-end")).apply {
+            label(lookAhead(0), "")
+            stmt?.let {
+                this.label(stmt, bundle.get("diag.miss-stmt-end.stmt"))
+            }
+        }
         return false
     }
 
