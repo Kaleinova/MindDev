@@ -412,10 +412,7 @@ class Parser(
         if (check(TokenType.LESS)) {
             val result = generics()
             if (result != null) {
-                if (result.remaining != 0) {
-                    error(bundle.get("diag.redundant-gt"))
-                        .label(prevToken.span.takeLast(result.remaining))
-                }
+                result.checkRemaining()
                 if (result.args.size != 0) {
                     typeParams = result.args
                 }
@@ -576,10 +573,7 @@ class Parser(
         val result = if (check(TokenType.LESS)) generics() else null
         var typeParams: Seq<Expr.Identifier>? = null
         if (result != null) {
-            if (result.remaining != 0) {
-                error(bundle.get("diag.redundant-gt"))
-                    .label(prevToken.span.takeLast(result.remaining))
-            }
+            result.checkRemaining()
             if (result.args.size != 0) {
                 typeParams = result.args
             }
@@ -699,10 +693,7 @@ class Parser(
         if (check(TokenType.LESS)) {
             val result = generics()
             if (result != null) {
-                if (result.remaining != 0) {
-                    error(bundle.get("diag.redundant-gt"))
-                        .label(prevToken.span.takeLast(result.remaining))
-                }
+                result.checkRemaining()
                 if (result.args.size != 0) {
                     typeParams = result.args
                 }
@@ -1240,14 +1231,18 @@ class Parser(
             restoreSnapshot(snapshot)
             return Expr.Identifier(id.span, id, Seq(0))
         }
-        if (result.remaining != 0) {
-            error(bundle.get("diag.redundant-gt"))
-                .label(prevToken.span.takeLast(result.remaining))
-        }
+        result.checkRemaining()
         return Expr.Identifier(between(id, prevToken, result.remaining), id, result.args)
     }
 
-    private data class GenericsResult(val args: Seq<Expr.Identifier>, val remaining: Int)
+    inner class GenericsResult(val args: Seq<Expr.Identifier>, val remaining: Int) {
+        fun checkRemaining() {
+            if (remaining != 0) {
+                error(bundle.get("diag.redundant-gt"))
+                    .label(prevToken.span.takeLast(remaining))
+            }
+        }
+    }
 
     /**
      * 在`check(TokenType.LESS)`之后调用
