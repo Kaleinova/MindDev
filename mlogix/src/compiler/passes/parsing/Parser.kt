@@ -537,8 +537,8 @@ class Parser(
 
         if (isStmtEnd) {
             error(bundle.get("diag.set-without-var"))
-                .label(start, "")
                 .label(lookAhead(0), "")
+                .label(start, "")
             return null
         }
         var expr = expression()
