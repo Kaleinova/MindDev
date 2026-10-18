@@ -412,10 +412,11 @@ class Parser(
         var typeParams: Seq<Expr.Identifier>? = null
         if (check(TokenType.LESS)) {
             val result = generics()
-            if (result != null) {
+            if (result is GenericsResult.Success) {
                 result.checkRemaining()
-                if (result.args.size != 0) {
-                    typeParams = result.args
+                result.checkEmpty()
+                if (result.generics.size != 0) {
+                    typeParams = result.generics
                 }
             }
         }
@@ -578,12 +579,15 @@ class Parser(
             recoverByTokenTree(TokenType.RECOVERY)
             return null
         }
-        val result = if (check(TokenType.LESS)) generics() else null
         var typeParams: Seq<Expr.Identifier>? = null
-        if (result != null) {
-            result.checkRemaining()
-            if (result.args.size != 0) {
-                typeParams = result.args
+        if (check(TokenType.LESS)) {
+            val result = generics()
+            if (result is GenericsResult.Success) {
+                result.checkRemaining()
+                result.checkEmpty()
+                if (result.generics.size != 0) {
+                    typeParams = result.generics
+                }
             }
         }
 
@@ -700,10 +704,11 @@ class Parser(
         var typeParams: Seq<Expr.Identifier>? = null
         if (check(TokenType.LESS)) {
             val result = generics()
-            if (result != null) {
+            if (result is GenericsResult.Success) {
                 result.checkRemaining()
-                if (result.args.size != 0) {
-                    typeParams = result.args
+                result.checkEmpty()
+                if (result.generics.size != 0) {
+                    typeParams = result.generics
                 }
             }
         }
@@ -1237,77 +1242,124 @@ class Parser(
     private fun identifierWithGenerics(id: Token): Expr.Identifier {
         if (!check(TokenType.LESS)) return Expr.Identifier(id)
         val snapshot = createSnapshotWithDiagHandler()
-        val result = generics()
-        if (result == null) {
-            restoreSnapshot(snapshot)
-            return Expr.Identifier(id.span, id, Seq(0))
+        return when (val result = generics()) {
+            is GenericsResult.Success -> {
+                result.checkRemaining()
+                result.checkEmpty()
+                Expr.Identifier(
+                    between(id, result.closeAngle.takeFirst(1)),
+                    id,
+                    result.generics
+                )
+            }
+
+            is GenericsResult.NotGeneric -> {
+                restoreSnapshot(snapshot)
+                Expr.Identifier(id.span, id)
+            }
+
+            is GenericsResult.Failure -> Expr.Identifier(id.span, id)
         }
-        result.checkRemaining()
-        return Expr.Identifier(between(id, prevToken, result.remaining), id, result.args)
     }
 
-    inner class GenericsResult(val args: Seq<Expr.Identifier>, val remaining: Int) {
-        fun checkRemaining() {
-            if (remaining != 0) {
-                val span = prevToken.span.takeLast(remaining)
-                error(bundle.get("diag.redundant-gt")).apply {
-                    label(span)
-                    help(bundle.get("diag.redundant-gt.help"))
-                        .insert(span, " ")
-                }
+    sealed class GenericsResult {
+        data object NotGeneric : GenericsResult()
+        data object Failure : GenericsResult()
+        class Success(
+            val openAngle: Span,
+            val closeAngle: Span,
+            val generics: Seq<Expr.Identifier>,
+        ) : GenericsResult()
+    }
+
+    fun GenericsResult.Success.checkRemaining() {
+        when (closeAngle.len) {
+            1 -> {}
+
+            2 -> error(bundle.get("diag.redundant-gt")).apply {
+                val redundancy = closeAngle.takeLast(1)
+                label(redundancy)
+                help(bundle.get("diag.redundant-gt.help"))
+                    .insert(redundancy, " ")
             }
+
+            3 -> error(bundle.get("diag.redundant-sar")).apply {
+                val redundancy = closeAngle.takeLast(2)
+                label(redundancy)
+                help(bundle.get("diag.redundant-sar.help"))
+                    .insert(redundancy, " ")
+            }
+        }
+    }
+
+    fun GenericsResult.Success.checkEmpty() {
+        if (generics.isEmpty) {
+            error(bundle.get("diag.empty-generics"))
+                .label(between(openAngle, closeAngle.takeFirst(1)))
         }
     }
 
     /**
      * 在`check(TokenType.LESS)`之后调用
-     * @return `null` 解析失败，建议回溯；
-     * `GenericsResult{ args = Seq(0), _ }` 无泛型或解析失败，无需回溯
+     * @return [GenericsResult.NotGeneric] 可能不是泛型，建议回溯；
+     * [GenericsResult.Failure] 无泛型或解析失败，无需回溯
      */
-    private fun generics(): GenericsResult? {
-        next()
-        val args = Seq<Expr.Identifier>(2)
-        var remaining = 0
+    private fun generics(): GenericsResult {
+        val start = next().span // <
+        val gens = Seq<Expr.Identifier>(2)
         while (true) {
-            // 优先使用剩下的结束符
-            if (remaining != 0) {
-                remaining--
-                return GenericsResult(args, remaining)
-            }
             // 文件结束，建议回溯
             if (isAtEnd) {
-                return null
+                return GenericsResult.Failure
             }
             // 正常结束并返回剩余的结束符
-            when {
-                match(TokenType.GREATER) ->
-                    return GenericsResult(args, remaining)
-
-                match(TokenType.SAR) -> {
-                    // >> 用掉一个剩一个
-                    remaining += 1
-                    return GenericsResult(args, remaining)
-                }
-
-                match(TokenType.SHR) -> {
-                    // >>> 用掉一个剩两个
-                    remaining += 2
-                    return GenericsResult(args, remaining)
-                }
+            if (check(TokenType.CLOSE_ANGLES)) {
+                return GenericsResult.Success(start, next().span, gens)
             }
             if (check(TokenType.IDENTIFIER)) {
                 val id = next()
 
                 // 检查子泛型
                 if (check(TokenType.LESS)) {
-                    // 子泛型解析失败，本泛型同样失败
-                    val subGenerics = generics() ?: return null
-                    // 与 identifier() 同理：span 覆盖到 `>`（`Option<Int>` 整体），
-                    // 多消耗的 `>`（`>>` 拆分）要切掉
-                    args.add(Expr.Identifier(between(id, prevToken, subGenerics.remaining), id, subGenerics.args))
-                    remaining += subGenerics.remaining
+                    when (val subGenerics = generics()) {
+                        is GenericsResult.NotGeneric, is GenericsResult.Failure -> {
+                            // 子泛型解析失败，本泛型同样失败
+                            return subGenerics
+                        }
+
+                        is GenericsResult.Success -> {
+                            subGenerics.checkEmpty()
+                            gens.add(
+                                Expr.Identifier(
+                                    between(id, subGenerics.closeAngle.takeFirst(1)),
+                                    id,
+                                    subGenerics.generics
+                                )
+                            )
+                            when (subGenerics.closeAngle.len) {
+                                // `>`属于子泛型
+                                1 -> {}
+                                // `>>`，第一个`>`属于子泛型
+                                2 -> {
+                                    return GenericsResult.Success(
+                                        start,
+                                        subGenerics.closeAngle.takeLast(1),
+                                        gens
+                                    )
+                                }
+                                // `>>>`，第一个`>`属于子泛型
+                                3 -> {
+                                    return GenericsResult.Success(
+                                        start,
+                                        subGenerics.closeAngle.takeLast(2),
+                                        gens
+                                    )
+                                }
+                            }
+                        }
+                    }
                 } else {
-                    args.add(Expr.Identifier(id))
+                    gens.add(Expr.Identifier(id))
                 }
                 match(TokenType.COMMA)
                 continue
@@ -1315,28 +1367,13 @@ class Parser(
             val parentId = prevToken
             val afterParentId = lookAhead(0)
             // 能恢复到结束符则报错并返回零个泛型，无需回溯
-            if (TokenType.RIGHT_ANGLE_BRACKETS.contains(
-                    recover(TokenType.RECOVERY + TokenType.RIGHT_ANGLE_BRACKETS - TokenType.RPAREN)
+            if (TokenType.CLOSE_ANGLES.contains(
+                    recover(TokenType.RECOVERY + TokenType.CLOSE_ANGLES - TokenType.RPAREN)
                 )
             ) {
                 error(bundle.get("diag.miss-ident-as-type-param"))
                     .label(between(parentId, prevToken))
-                when {
-                    match(TokenType.GREATER) ->
-                        return GenericsResult(Seq(0), remaining)
-
-                    match(TokenType.SAR) -> {
-                        // >> 用掉一个剩一个
-                        remaining += 1
-                        return GenericsResult(Seq(0), remaining)
-                    }
-
-                    match(TokenType.SHR) -> {
-                        // >>> 用掉一个剩两个
-                        remaining += 2
-                        return GenericsResult(Seq(0), remaining)
-                    }
-                }
+                return GenericsResult.Failure
             }
             // 失败后选择不回溯则保留的错误诊断
             error(bundle.get("diag.miss-type-param-end")).apply {
@@ -1345,7 +1382,7 @@ class Parser(
                     .insert(afterParentId, ">")
             }
             // 失败，建议回溯
-            return null
+            return GenericsResult.NotGeneric
         }
     }
 
@@ -1358,7 +1395,7 @@ class Parser(
         // id :
         if (!isStmtEnd && check(TokenType.COLON)) {
             val colon = next()
-            if (subject.generics != null) {
+            if (!subject.generics.isEmpty) {
                 error(bundle.get("diag.unexpected-generic-type-in-annotation"))
                     .label(subject.span.takeLast(subject.span.len - subject.token.span.len))
             }
@@ -1821,6 +1858,7 @@ class Parser(
      * 生成当前文件的span
      * @param from 起始
      * @param to 末尾
+     * @param dropTail 删减末尾长度（用于[Parser.generics]构造时删减不属于本层泛型的`>`)
      */
     private fun between(from: Spanned, to: Spanned, dropTail: Int = 0): Span {
         return Span.between(sourceFile.index, from.span().start, to.span().end - dropTail)

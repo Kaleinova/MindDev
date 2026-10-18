@@ -975,7 +975,7 @@ class TypeInferencer(val context: CompilerContext) {
         // 泛型函数（或值位置携带显式类型实参）：按调用点实例化类型方案，
         // 每次引用得到独立的类型变量（多态）。
         val explicitGenerics = expr.generics
-        val hasExplicit = explicitGenerics != null && !explicitGenerics.isEmpty
+        val hasExplicit = !explicitGenerics.isEmpty
         val declaredCount = symbol.values.get(Symbol.TYPE_PARAM_COUNT_KEY) as? Int ?: 0
         if (!symbol.typeScheme.typeVars.isEmpty || declaredCount != 0 || hasExplicit) {
             return InferResult(instantiateScheme(symbol, expr, declaredCount), Seq(0), origin)
@@ -2122,7 +2122,7 @@ class TypeInferencer(val context: CompilerContext) {
      */
     private fun identifierOrigin(expr: Expr.Identifier): TypeOrigin {
         val args = expr.generics
-        if (args == null || args.isEmpty) return TypeOrigin(expr.span)
+        if (args.isEmpty) return TypeOrigin(expr.span)
         return TypeOrigin(expr.span, args.map { identifierOrigin(it) })
     }
 
@@ -2145,7 +2145,7 @@ class TypeInferencer(val context: CompilerContext) {
 
         val symbol = expr.defId?.let { symbolTable.get(it) }
         val nestedArgs = expr.generics
-        if (nestedArgs != null && !nestedArgs.isEmpty) {
+        if (!nestedArgs.isEmpty) {
             // 嵌套应用 `Head<Args...>`
             if (symbol?.values?.get(Symbol.TYPE_PARAM_KEY) == true) {
                 // TODO: 支持高阶类型（对类型参数应用类型实参 `T<U>`，kind `* -> *`）后移除
@@ -2281,7 +2281,7 @@ class TypeInferencer(val context: CompilerContext) {
      */
     private fun instantiateScheme(symbol: Symbol, expr: Expr.Identifier, declaredCount: Int): Type {
         val explicitArgs = expr.generics
-        val argCount = explicitArgs?.size ?: 0
+        val argCount = explicitArgs.size
         if (argCount != 0 && argCount != declaredCount) {
             val diagnostic = error(bundle.format("diag.explicit-type-arg-count", declaredCount, argCount))
                 .label(expr, bundle.format("diag.explicit-type-arg-count.help", declaredCount))
@@ -2299,7 +2299,7 @@ class TypeInferencer(val context: CompilerContext) {
             return symbol.typeScheme.instantiateWith(Seq<Type>(0)) { solver.freshVar() }
         }
         val argTypes = Seq<Type>(argCount)
-        for (a in explicitArgs!!) argTypes.add(typeArgToType(a))
+        for (a in explicitArgs) argTypes.add(typeArgToType(a))
         return symbol.typeScheme.instantiateWith(argTypes) { solver.freshVar() }
     }
 

@@ -216,7 +216,7 @@ enum class TokenType(private val keyword: String? = null) {
             PLUS, MINUS
         )
 
-        val RIGHT_ANGLE_BRACKETS: Set<TokenType> = EnumSet.of(
+        val CLOSE_ANGLES: Set<TokenType> = EnumSet.of(
             GREATER, SAR, SHR
         )
 

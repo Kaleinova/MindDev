@@ -14,10 +14,8 @@ abstract class Expr(span: Span) : ASTNode(span) {
 
     /**
      * 标识符
-     *
-     * @param generics null表示语法上没有尝试定义；非null但为空表示语法上`<>`
      */
-    data class Identifier(override val span: Span, val token: Token, val generics: Seq<Identifier>? = null) : Expr(
+    data class Identifier(override val span: Span, val token: Token, val generics: Seq<Identifier> = Seq(0)) : Expr(
         span
     ) {
         constructor(token: Token) : this(token.span, token)

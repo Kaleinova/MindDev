@@ -49,6 +49,12 @@ class Span : Spanned {
     val end: Int
         get() = start + len
 
+    /** 截取开头部分 */
+    fun takeFirst(takeLen: Int): Span {
+        if (takeLen > len) return this
+        return Span(index, start, takeLen)
+    }
+
     /** 截取末尾部分 */
     fun takeLast(takeLen: Int): Span {
         if (takeLen > len) return this
