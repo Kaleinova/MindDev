@@ -1,20 +1,10 @@
-package mlogix.compiler
+package mlogix.compiler.semantics
 
-import arc.files.Fi
-import arc.util.I18NBundle.createBundle
-import mlogix.compiler.core.CompilerConfig
-import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.token.TokenType
-import mlogix.compiler.diagnostic.DiagHandler
-import mlogix.compiler.passes.parsing.Lexer
-import mlogix.compiler.passes.parsing.Parser
-import mlogix.compiler.passes.resolution.Resolver
-import mlogix.compiler.passes.typing.TypeInferencer
-import mlogix.compiler.pipeline.CompilationContext
+import mlogix.compiler.support.CompilerTestBase
 import mlogix.util.I18N
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 /**
@@ -25,58 +15,7 @@ import org.junit.jupiter.api.Test
  * - 模式只有 `_`、裸标识符绑定、`枚举名.变体(...)` 三种（无字面量模式）；
  * - 裸标识符一律是**绑定**（Rust 风格），要匹配变体必须写全 `枚举名.变体`。
  */
-class MatchTest {
-    private val context = CompilationContext(DiagHandler(), CompilerConfig())
-    private val lexer = Lexer(context)
-    private val parser = Parser(lexer, context)
-    private val resolver = Resolver(context)
-    private val inferencer = TypeInferencer(context)
-
-    companion object {
-        @BeforeAll
-        @JvmStatic
-        fun init() {
-            val projectDirectory = Fi.get(System.getProperty("user.dir"))
-            I18N.bundle = createBundle(projectDirectory.child("assets/bundles/bundle"))
-        }
-    }
-
-    private fun analyze(source: String) {
-        context.diagHandler.clear()
-        val sourceFile = SourceFile(source)
-        val ast = parser.parse(sourceFile)
-        val result = resolver.resolve(ast, sourceFile)
-        inferencer.analyze(result, sourceFile)
-    }
-
-    private fun errors(source: String): Int {
-        analyze(source)
-        return context.diagHandler.errorNum()
-    }
-
-    private fun warnings(source: String): Int {
-        analyze(source)
-        return context.diagHandler.warningNum()
-    }
-
-    /** 断言诊断文本里含某个 key 格式化后的片段（中英皆可，避免硬编码文案） */
-    private fun assertErrorMentions(source: String, vararg keyAndArgs: Any) {
-        analyze(source)
-        val key = keyAndArgs[0] as String
-        val args = keyAndArgs.drop(1).toTypedArray()
-        val expected = if (args.isEmpty()) I18N.bundle.get(key) else I18N.bundle.format(key, *args)
-        val messages = context.diagHandler.errors.joinToString("\n") { it.message }
-        assertTrue(messages.contains(expected), "错误消息应包含「$expected」，实际:\n$messages")
-    }
-
-    private fun assertWarningMentions(source: String, vararg keyAndArgs: Any) {
-        analyze(source)
-        val key = keyAndArgs[0] as String
-        val args = keyAndArgs.drop(1).toTypedArray()
-        val expected = if (args.isEmpty()) I18N.bundle.get(key) else I18N.bundle.format(key, *args)
-        val messages = context.diagHandler.warnings.joinToString("\n") { it.message }
-        assertTrue(messages.contains(expected), "告警应包含「$expected」，实际:\n$messages")
-    }
+class MatchTest : CompilerTestBase() {
 
     private val optionEnum = """
         enum Option<T> {

@@ -1,20 +1,8 @@
-package mlogix.compiler
+package mlogix.compiler.diagnostic
 
-import arc.files.Fi
-import arc.util.I18NBundle.createBundle
-import mlogix.compiler.core.CompilerConfig
-import mlogix.compiler.core.SourceFile
-import mlogix.compiler.core.span.Span
-import mlogix.compiler.diagnostic.DiagHandler
-import mlogix.compiler.diagnostic.Diagnostic
-import mlogix.compiler.passes.parsing.Lexer
-import mlogix.compiler.passes.parsing.Parser
-import mlogix.compiler.passes.resolution.Resolver
-import mlogix.compiler.passes.typing.TypeInferencer
-import mlogix.compiler.pipeline.CompilationContext
+import mlogix.compiler.support.CompilerTestBase
 import mlogix.util.I18N
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 /**
@@ -24,32 +12,7 @@ import org.junit.jupiter.api.Test
  * 机制见 [mlogix.compiler.core.type.TypeOrigin]：与类型结构对齐的来源树随约束进入求解器，
  * 合一递归下钻时把 label 逐层收窄；来源缺失或结构漂移时按原 span 就近退化。
  */
-class DiagnosticSpanTest {
-    private val context = CompilationContext(DiagHandler(), CompilerConfig())
-    private val lexer = Lexer(context)
-    private val parser = Parser(lexer, context)
-    private val resolver = Resolver(context)
-    private val inferencer = TypeInferencer(context)
-
-    companion object {
-        @BeforeAll
-        @JvmStatic
-        fun init() {
-            val projectDirectory = Fi.get(System.getProperty("user.dir"))
-            I18N.bundle = createBundle(projectDirectory.child("assets/bundles/bundle"))
-        }
-    }
-
-    /** 解析 → 名称解析 → 类型推断；返回源码本身（span 是源码字符偏移，可直接切片断言） */
-    private fun analyze(source: String): String {
-        context.diagHandler.clear()
-        val sourceFile = SourceFile(source)
-        val ast = parser.parse(sourceFile)
-        val result = resolver.resolve(ast, sourceFile)
-        inferencer.analyze(result, sourceFile)
-        return source
-    }
-
+class DiagnosticSpanTest : CompilerTestBase() {
     /** 断言唯一那条错误的两个 label 分别恰好覆盖 [useText]（使用方/实际）与 [declText]（声明方/期望） */
     private fun assertLabels(source: String, useText: String, declText: String) {
         assertEquals(1, context.diagHandler.errorNum(), "本用例应只报一个错误")
@@ -59,13 +22,11 @@ class DiagnosticSpanTest {
         assertEquals(declText, textOf(source, error.labels[1].span), "声明方 label")
     }
 
-    private fun textOf(source: String, span: Span): String = source.substring(span.start, span.end)
-
     // ========== 显式类型实参数量不匹配：label 与 note ==========
 
     @Test
     fun `enum type argument count mismatch labels the type expression and notes the declaration`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -90,7 +51,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `extra type arguments are labeled and offered for removal`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -117,7 +78,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `function type argument count mismatch also notes the declaration`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             fn id<T>(x: T) -> T { return x }
             set e = id<Int, Str>(1)
@@ -139,7 +100,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `declared generic enum payload mismatch points at the type argument`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -158,7 +119,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `nested generic payload mismatch descends to the innermost write`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -174,7 +135,7 @@ class DiagnosticSpanTest {
     @Test
     fun `generic function parameter annotation also narrows the declaration label`() {
         // 泛型函数的形参类型可能不是类型变量（`x: Option<Int>`），来源按下标登记才能覆盖
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -191,7 +152,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `non generic variant payload mismatch keeps precise labels`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Shape {
                 Circle(Num)
@@ -204,7 +165,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `struct variant field mismatch points at the declaring field type`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Shape {
                 Rect { width: Int, height: Str }
@@ -220,7 +181,7 @@ class DiagnosticSpanTest {
     @Test
     fun `return mismatch points at the returned expression`() {
         // 注意返回值类型注解要写成 `-> r : Int`（带名字的注解形式）
-        val source = analyze(
+        val source = analyzeSource(
             """
             fn f() -> r : Int { return "s" }
             """.trimIndent()
@@ -231,7 +192,7 @@ class DiagnosticSpanTest {
     @Test
     fun `declared array element type is pointed at even for array literals`() {
         // 期望类型 `Array<Int>` 下推后，**使用方**也精确到出错的那个元素（此前只能指整个数组字面量）
-        val source = analyze(
+        val source = analyzeSource(
             """
             fn f(xs: Array<Int>) -> Int { return 0 }
             set r = f({"a"})
@@ -242,7 +203,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `array element mismatch points at the offending element`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             set a : Array<Int> = {1, "x"}
             """.trimIndent()
@@ -253,7 +214,7 @@ class DiagnosticSpanTest {
     @Test
     fun `nested array of enum payload is checked at the innermost literal`() {
         // 数组元素期望 → 变体构造器采用期望的枚举类型 → 载荷期望：三层下推落到 `"s"`
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -267,7 +228,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `return value is checked in place`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -282,7 +243,7 @@ class DiagnosticSpanTest {
     @Test
     fun `generic parameters are not pushed across call sites`() {
         // 泛型函数的 `T` 跨调用点共享：期望类型绝不能下推，否则两次调用会互相污染
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -299,7 +260,7 @@ class DiagnosticSpanTest {
     @Test
     fun `payload argument that ignores the expectation is still checked`() {
         // 表达式（二元运算）不消费期望类型：必须退回粗约束，否则会漏检
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -315,7 +276,7 @@ class DiagnosticSpanTest {
     @Test
     fun `payload positions that cannot be mapped to a type argument are still checked`() {
         // `P(Array<T>)` 里 T 嵌在更深层：无法下推，靠枚举类型实参兜底约束报错
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum E<T> {
                 P(Array<T>)
@@ -331,7 +292,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `set annotation is checked against the initial value`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             set a : Int = "s"
             """.trimIndent()
@@ -341,7 +302,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `set annotation with a generic enum narrows to the type argument`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -355,7 +316,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `set annotation with an array narrows to the element type`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             set a : Array<Int> = {"x"}
             """.trimIndent()
@@ -365,7 +326,7 @@ class DiagnosticSpanTest {
 
     @Test
     fun `set annotation without initializer constrains later assignments`() {
-        val source = analyze(
+        val source = analyzeSource(
             """
             set a : Int
             a = "s"
@@ -380,7 +341,7 @@ class DiagnosticSpanTest {
     @Test
     fun `enum type argument count in annotation also labels the extra argument`() {
         // 注解位置（`x: Option<Int, Str>`）与 turbofish 位置（`Option<Int, Str>.Some`）是同一类错误
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -406,7 +367,7 @@ class DiagnosticSpanTest {
     @Test
     fun `missing type argument source degrades to the type expression`() {
         // 裸 `Option` 注解没有类型实参可指：声明方退化为 `Option` 本身，绝不报错或变宽
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None
@@ -428,7 +389,7 @@ class DiagnosticSpanTest {
     fun `call through an alias keeps the annotated span when origins are unavailable`() {
         // 经变量间接调用时拿不到形参来源（不是具名函数）：声明方退回注解 span（既有行为），
         // 使用方仍因实参自身的来源树而下钻到 `"s"`
-        val source = analyze(
+        val source = analyzeSource(
             """
             enum Option<T> {
                 None

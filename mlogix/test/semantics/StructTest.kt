@@ -1,29 +1,19 @@
-package mlogix.compiler
+package mlogix.compiler.semantics
 
-import arc.files.Fi
 import arc.struct.Seq
-import arc.util.I18NBundle.createBundle
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Stmt
-import mlogix.compiler.core.CompilerConfig
-import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
-import mlogix.compiler.diagnostic.DiagHandler
-import mlogix.compiler.passes.parsing.Lexer
-import mlogix.compiler.passes.parsing.Parser
-import mlogix.compiler.passes.resolution.Resolver
-import mlogix.compiler.passes.typing.TypeInferencer
-import mlogix.compiler.pipeline.CompilationContext
+import mlogix.compiler.support.CompilerTestBase
 import mlogix.util.I18N
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 /**
- * 结构体的端到端测试：语法（[Parser]）→ 名称解析（[Resolver]）→ 类型推断（[TypeInferencer]）。
+ * 结构体的端到端测试：语法（Parser）→ 名称解析（Resolver）→ 类型推断（TypeInferencer）。
  *
  * 语言约定（与使用者确认过的语义）：
  * - 构造一律是**函数调用** `Point(1.0, 2.0)`（不引入 `Point { x: 1.0 }` 字面量语法）；
@@ -36,43 +26,9 @@ import org.junit.jupiter.api.Test
  * 注意类型：`Num` 字段要写浮点字面量（`1.0`），整数字面量 `1` 是 `Int`，
  * 与 `Num` 是不同类型（本语言不做数值字面量的隐式提升）。
  */
-class StructTest {
-    private val context = CompilationContext(DiagHandler(), CompilerConfig())
-    private val lexer = Lexer(context)
-    private val parser = Parser(lexer, context)
-    private val resolver = Resolver(context)
-    private val inferencer = TypeInferencer(context)
-
+class StructTest : CompilerTestBase() {
     companion object {
         val span = Span(0, 0, 0)
-
-        @BeforeAll
-        @JvmStatic
-        fun init() {
-            val projectDirectory = Fi.get(System.getProperty("user.dir"))
-            I18N.bundle = createBundle(projectDirectory.child("assets/bundles/bundle"))
-        }
-
-    }
-
-    private fun parse(source: String): Stmt {
-        context.diagHandler.clear()
-        return parser.parse(SourceFile(source))
-    }
-
-    /** 解析 → 名称解析 → 类型推断，返回错误数 */
-    private fun analyze(source: String): Int {
-        context.diagHandler.clear()
-        val sourceFile = SourceFile(source)
-        val ast = parser.parse(sourceFile)
-        val result = resolver.resolve(ast, sourceFile)
-        inferencer.analyze(result, sourceFile)
-        return context.diagHandler.errorNum()
-    }
-
-    private fun errorMessages(source: String): String {
-        analyze(source)
-        return context.diagHandler.errors.joinToString("\n") { it.message }
     }
 
     // ========== 语法 ==========

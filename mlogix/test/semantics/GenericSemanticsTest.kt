@@ -1,66 +1,17 @@
-package mlogix.compiler
+package mlogix.compiler.semantics
 
-import arc.files.Fi
 import arc.struct.Seq
-import arc.util.I18NBundle.createBundle
-import mlogix.compiler.core.CompilerConfig
-import mlogix.compiler.core.SourceFile
-import mlogix.compiler.core.symbol.SymbolTable
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
-import mlogix.compiler.diagnostic.DiagHandler
-import mlogix.compiler.passes.parsing.Lexer
-import mlogix.compiler.passes.parsing.Parser
-import mlogix.compiler.passes.resolution.Resolver
-import mlogix.compiler.passes.typing.TypeInferencer
-import mlogix.compiler.pipeline.CompilationContext
-import mlogix.util.I18N
+import mlogix.compiler.support.CompilerTestBase
 import org.junit.jupiter.api.Assertions.*
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 /**
  * 泛型语义（Resolver + TypeInferencer + TypeSolver）端到端测试：
  * 解析 → 名称解析 → 类型推断，断言错误数。
  */
-class GenericSemanticsTest {
-    private val context = CompilationContext(DiagHandler(), CompilerConfig())
-    private val lexer = Lexer(context)
-    private val parser = Parser(lexer, context)
-    private val resolver = Resolver(context)
-    private val inferencer = TypeInferencer(context)
-
-    companion object {
-        @BeforeAll
-        @JvmStatic
-        fun init() {
-            val projectDirectory = Fi.get(System.getProperty("user.dir"))
-            I18N.bundle = createBundle(projectDirectory.child("assets/bundles/bundle"))
-        }
-    }
-
-    /** 解析 → 名称解析 → 类型推断，返回推断后的错误数（parser.parse 会先清空诊断） */
-    private fun analyze(source: String): Int {
-        analyzeSymbols(source)
-        return context.diagHandler.errorNum()
-    }
-
-    /** 解析 → 名称解析 → 类型推断，返回推断后的符号表（诊断仍记在 context.diagHandler） */
-    private fun analyzeSymbols(source: String): SymbolTable {
-        context.diagHandler.clear()
-        val sourceFile = SourceFile(source)
-        val ast = parser.parse(sourceFile)
-        val result = resolver.resolve(ast, sourceFile)
-        inferencer.analyze(result, sourceFile)
-        return result.symbolTable
-    }
-
-    /** 求解后符号 [name] 的类型 */
-    private fun typeOf(table: SymbolTable, name: String): Type {
-        val symbol = table.all().firstOrNull { it.name == name }
-        assertNotNull(symbol, "符号 `$name` 必须存在")
-        return symbol!!.type
-    }
+class GenericSemanticsTest : CompilerTestBase() {
 
     // ========== 正例：0 错误 ==========
 

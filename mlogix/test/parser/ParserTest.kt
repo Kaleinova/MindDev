@@ -1,44 +1,19 @@
-package mlogix.compiler
+package mlogix.compiler.parser
 
-import arc.files.Fi
 import arc.struct.Seq
-import arc.util.I18NBundle.createBundle
 import mlogix.compiler.ast.Expr
 import mlogix.compiler.ast.Pattern
 import mlogix.compiler.ast.Stmt
-import mlogix.compiler.core.CompilerConfig
-import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
-import mlogix.compiler.diagnostic.DiagHandler
-import mlogix.compiler.passes.parsing.Lexer
-import mlogix.compiler.passes.parsing.Parser
-import mlogix.compiler.pipeline.CompilationContext
-import mlogix.util.I18N
+import mlogix.compiler.support.CompilerTestBase
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
-class ParserTest {
-    val context = CompilationContext(DiagHandler(), CompilerConfig())
-    val parser = Parser(Lexer(context), context)
-
+class ParserTest : CompilerTestBase() {
     companion object {
         val span = Span(0, 0, 0)
-
-        @BeforeAll
-        @JvmStatic
-        fun init() {
-            val projectDirectory = Fi.get(System.getProperty("user.dir"))
-            I18N.bundle = createBundle(projectDirectory.child("assets/bundles/bundle"))
-        }
-    }
-
-    private fun parse(source: String): Stmt {
-        context.diagHandler.clear()
-        val sourceFile = SourceFile(source)
-        return parser.parse(sourceFile)
     }
 
     @Test

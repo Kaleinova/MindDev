@@ -1,21 +1,11 @@
-package mlogix.compiler
+package mlogix.compiler.diagnostic
 
-import arc.files.Fi
-import arc.util.I18NBundle.createBundle
-import mlogix.compiler.core.CompilerConfig
 import mlogix.compiler.core.SourceMap
 import mlogix.compiler.core.span.Span
-import mlogix.compiler.diagnostic.DiagHandler
-import mlogix.compiler.diagnostic.Diagnostic
-import mlogix.compiler.passes.parsing.Lexer
-import mlogix.compiler.passes.parsing.Parser
-import mlogix.compiler.passes.resolution.Resolver
-import mlogix.compiler.passes.typing.TypeInferencer
-import mlogix.compiler.pipeline.CompilationContext
+import mlogix.compiler.support.CompilerTestBase
 import mlogix.util.I18N
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 /**
@@ -24,16 +14,7 @@ import org.junit.jupiter.api.Test
  * 回归背景：`renderLine` 曾用 `space < 0 → continue` 直接丢弃与前一 label 重叠的 label，
  * 于是「主 label 圈整个类型表达式 + 次级 label 圈其中一个类型实参」这类标注永远画不出来。
  */
-class DiagnosticRenderTest {
-
-    companion object {
-        @BeforeAll
-        @JvmStatic
-        fun init() {
-            val projectDirectory = Fi.get(System.getProperty("user.dir"))
-            I18N.bundle = createBundle(projectDirectory.child("assets/bundles/bundle"))
-        }
-    }
+class DiagnosticRenderTest : CompilerTestBase() {
 
     /** 用一段源码 + 若干 (start, end, text) 标注渲染出诊断文本 */
     private fun render(source: String, vararg labels: Triple<Int, Int, String>): String {
@@ -153,14 +134,8 @@ class DiagnosticRenderTest {
 
     /** 跑一遍「解析 → 名称解析 → 类型推断」并把首条错误渲染出来 */
     private fun renderEnumArity(source: String): String {
-        val sourceMap = SourceMap(null)
-        val context = CompilationContext(DiagHandler(sourceMap), CompilerConfig())
-        val sourceFile = sourceMap.loadSourceMap(source)
-        val ast = Parser(Lexer(context), context).parse(sourceFile)
-        val resolved = Resolver(context).resolve(ast, sourceFile)
-        TypeInferencer(context).analyze(resolved, sourceFile)
-
-        assertEquals(1, context.diagHandler.errorNum())
-        return context.diagHandler.errors[0].render(sourceMap)
+        val result = analyzeFile(source)
+        assertEquals(1, result.errorNum())
+        return result.errors[0].render(result.sourceMap)
     }
 }

@@ -1,42 +1,17 @@
-package mlogix.compiler
+package mlogix.compiler.lexer
 
-import arc.files.Fi
 import arc.graphics.Color
 import arc.graphics.Colors
 import arc.struct.Seq
-import arc.util.I18NBundle.createBundle
-import mlogix.compiler.core.CompilerConfig
-import mlogix.compiler.core.SourceFile
 import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.core.token.TokenType.*
-import mlogix.compiler.diagnostic.DiagHandler
-import mlogix.compiler.passes.parsing.Lexer
-import mlogix.compiler.pipeline.CompilationContext
-import mlogix.util.I18N
+import mlogix.compiler.support.CompilerTestBase
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
-class LexerTest {
-    val context = CompilationContext(DiagHandler(), CompilerConfig())
-    val lexer = Lexer(context)
-
-    companion object {
-        @BeforeAll
-        @JvmStatic
-        fun init() {
-            val projectDirectory = Fi.get(System.getProperty("user.dir"))
-            I18N.bundle = createBundle(projectDirectory.child("assets/bundles/bundle"))
-        }
-    }
-
-    private fun tokenize(source: String): Seq<Token> {
-        context.diagHandler.clear()
-        val sourceFile = SourceFile(source)
-        return lexer.tokenize(sourceFile)
-    }
+class LexerTest : CompilerTestBase() {
 
     @Test
     fun `tokenize simple arithmetic expression`() {

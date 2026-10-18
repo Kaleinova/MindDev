@@ -1,25 +1,11 @@
-package mlogix.compiler
+package mlogix.compiler.semantics
 
-import arc.files.Fi
 import arc.struct.Seq
-import arc.util.I18NBundle.createBundle
-import mlogix.compiler.core.CompilerConfig
-import mlogix.compiler.core.SourceFile
-import mlogix.compiler.core.span.Span
-import mlogix.compiler.core.symbol.SymbolTable
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
-import mlogix.compiler.diagnostic.DiagHandler
-import mlogix.compiler.ir.ResolutionResult
-import mlogix.compiler.passes.parsing.Lexer
-import mlogix.compiler.passes.parsing.Parser
-import mlogix.compiler.passes.resolution.Resolver
-import mlogix.compiler.passes.typing.TypeInferencer
-import mlogix.compiler.pipeline.CompilationContext
-import mlogix.util.I18N
+import mlogix.compiler.support.CompilerTestBase
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 /**
@@ -28,50 +14,7 @@ import org.junit.jupiter.api.Test
  * - 多个返回值建模为**元组**（`-> Int, Str` ≡ `(Int, Str)`），名字不进入类型；
  * - 断言求解后符号类型，确认声明真的参与了约束（而不只是错误计数）。
  */
-class ReturnTest {
-    private val context = CompilationContext(DiagHandler(), CompilerConfig())
-    private val lexer = Lexer(context)
-    private val parser = Parser(lexer, context)
-    private val resolver = Resolver(context)
-    private val inferencer = TypeInferencer(context)
-
-    companion object {
-        @BeforeAll
-        @JvmStatic
-        fun init() {
-            val projectDirectory = Fi.get(System.getProperty("user.dir"))
-            I18N.bundle = createBundle(projectDirectory.child("assets/bundles/bundle"))
-        }
-    }
-
-    /** 解析 → 名称解析 → 类型推断（诊断留在 context.diagHandler 里供断言取用） */
-    private fun analyzeFile(source: String): ResolutionResult {
-        context.diagHandler.clear()
-        val sourceFile = SourceFile(source)
-        val ast = parser.parse(sourceFile)
-        val result = resolver.resolve(ast, sourceFile)
-        inferencer.analyze(result, sourceFile)
-        return result
-    }
-
-    /** 推断后的错误数 */
-    private fun analyze(source: String): Int {
-        analyzeFile(source)
-        return context.diagHandler.errorNum()
-    }
-
-    /** 推断后的符号表 */
-    private fun analyzeSymbols(source: String): SymbolTable = analyzeFile(source).symbolTable
-
-    /** 求解后符号 [name] 的类型 */
-    private fun typeOf(table: SymbolTable, name: String): Type {
-        val symbol = table.all().firstOrNull { it.name == name }
-        assertNotNull(symbol, "符号 `$name` 必须存在")
-        return symbol!!.type
-    }
-
-    /** 源文件里 [span] 覆盖的原文（用于断言 label 落在哪个片段上） */
-    private fun textOf(source: String, span: Span): String = source.substring(span.start, span.end)
+class ReturnTest : CompilerTestBase() {
 
     /** `(T1, T2, ...)` */
     private fun tupleOf(vararg elements: Type): Type = Type.TupleType(Seq.with(*elements))

@@ -12,7 +12,7 @@
 | 编译 + debug 输出（含 AST） | `.\gradlew.bat :mlogix:compile-debug` |
 | 只看 token | `.\gradlew.bat :mlogix:tokenize-debug` |
 | 全量测试 | `.\gradlew.bat :mlogix:test` |
-| 单个测试类 | `.\gradlew.bat :mlogix:test --tests "mlogix.compiler.LexerTest"` |
+| 单个测试类 | `.\gradlew.bat :mlogix:test --tests "mlogix.compiler.lexer.LexerTest"` |
 
 **快速试错**：直接改 `mlogix/mlogix_test/test.mlx`（无需保留原内容），再跑 `:mlogix:compile` 看词法/语法/类型推断报错。
 `Compiler.compile()` 会遍历项目下所有 `.mlx` 文件（`mlogix/src/compiler/Compiler.kt`），不必手动指定。
@@ -76,7 +76,7 @@
 ## 项目约定与重要模式
 
 - **纯 Kotlin 工程**：源码（含测试）全在 `mlogix/src` 与 `mlogix/test` 下，二者同时是 Kotlin 源根（见
-  `mlogix/build.gradle.kts`），package 为 `mlogix`。新增源码放 `mlogix/src/…`，测试放 `mlogix/test/…`。
+  `mlogix/build.gradle.kts`），包名以 `mlogix.` 开头（测试按阶段放在 `mlogix.compiler.*`）。新增源码放 `mlogix/src/…`，测试放 `mlogix/test/…`。
 - 不使用不明确的缩写，比如：在不是简短for循环或lambda的形参时不允许变量为单词首字母或多个单词首字母直接结合 (如 `cond` ->
   `c`, `symbol` -> `sym`/`s`, `constrait` -> `cst`/`c`, `index` -> `idx`/`i`等都是不允许的)
     - 允许的缩写：
@@ -107,14 +107,20 @@
   `Compiler` 检查失败计数的唯一入口。
 - 各 pass **绝不能互相直接引用**；通过 IR 交换数据、经 `CompilerContext` 共享状态（open-closed principle）。分层依赖
   方向见 `mlogix/src/compiler/Compiler.kt` 里 `Seq` 的装配顺序与 `PassId` 的枚举顺序。
-- 测试用 JUnit 5（配置见 `mlogix/build.gradle.kts`）：`mlogix/test/compiler/LexerTest.kt` 展示如何实例化 `Lexer` 并断言
-  token 序列；`mlogix/test/compiler/ParserTest.kt` 展示 `parser.parse("2 + 3")`。
+- 测试用 JUnit 5（配置见 `mlogix/build.gradle.kts`），目录按阶段拆分：
+  - `mlogix/test/lexer/`、`parser/`、`semantics/`、`diagnostic/`、`core/`、`pipeline/`；
+  - `mlogix/test/support/` 提供统一夹具：`CompilerTestBase`（I18N + analyze/parse/tokenize）、
+    `CompilerFixture`（走真实 `Pipeline`）、`AnalysisResult`（源码/AST/符号表/诊断）、
+    `DiagnosticAssertions`（按 I18N key + label 源码片段断言）。
+- **新测试一律继承 `CompilerTestBase`**，不要自己 `new Lexer/Parser/Resolver/TypeInferencer`；
+  负例优先用 `analyzeFile(source).assertSingleError(...)` / `assertHasError(...)` +
+  `assertLabelSourceTexts(...)`，不要只写 `assertEquals(1, errorNum())`。
 
 ## 调试诊断/语义问题的推荐手法（别用「改一版跑一次」盲猜）
 
 - **短反馈回路**：改 `mlogix/mlogix_test/test.mlx` → `:mlogix:compile`（约 5 秒，打印真实诊断）。
-- **诊断计数/文案**：在 `mlogix/test/compiler/*Test.kt` 里加一个临时 `@Test`（用完删掉），复用该文件已有的 `analyze(source)`
-  跑 `.\gradlew.bat :mlogix:test --tests "mlogix.compiler.*Test" --console=plain --rerun-tasks 2>&1`。
+- **诊断计数/文案**：在对应阶段的 `*Test.kt` 里加一个临时 `@Test`（用完删掉），继承 `CompilerTestBase` 并复用
+  `analyzeFile(source)`；跑 `.\gradlew.bat :mlogix:test --tests "mlogix.compiler.*" --console=plain --rerun-tasks 2>&1`。
 - **先插桩确认数据，再改逻辑**：用`Type.pretty()`、`Seq.joinToString` 定位「数据到没到这儿」。
 - **失败先读** `mlogix/build/test-results/test/TEST-*.xml`（UTF-8，用 `Get-Content -Encoding UTF8` 读，否则中文断言消息
   乱码）——`message=` 已带断言文本，不必重跑测试。
@@ -157,5 +163,5 @@
 ## 推荐扩展任务
 
 - 新增 token 类型：更新 `Token` 定义、`Lexer.kt` 的 `Lexer.scanToken()`，让 `Parser` 能消费它，并在
-  `mlogix/test/compiler/*` 加单测。
+  `mlogix/test/lexer|parser|semantics|diagnostic` 加单测。
 - 新增 AST 节点：更新 `mlogix/src/compiler/ast/*.kt`、`ASTPrinter.kt`，调整 `Parser.kt` 构造该节点，**并确保 span 赋值**。
