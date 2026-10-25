@@ -9,6 +9,7 @@ import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.core.type.BuiltinType
 import mlogix.compiler.core.type.Type
 import mlogix.compiler.support.CompilerTestBase
+import mlogix.compiler.support.assertAstEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -562,6 +563,6 @@ class EnumTest : CompilerTestBase() {
     }
 
     private fun assertProgram(actual: Stmt, vararg stmts: Stmt) {
-        assertEquals(Stmt.Program(span, Seq.with(*stmts)), actual, "AST 结构必须匹配")
+        assertAstEquals(Stmt.Program(span, Seq.with(*stmts)), actual, "AST 结构必须匹配")
     }
 }

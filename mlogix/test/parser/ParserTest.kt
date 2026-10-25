@@ -8,7 +8,7 @@ import mlogix.compiler.core.span.Span
 import mlogix.compiler.core.token.Token
 import mlogix.compiler.core.token.TokenType
 import mlogix.compiler.support.CompilerTestBase
-import org.junit.jupiter.api.Assertions.assertEquals
+import mlogix.compiler.support.assertAstEquals
 import org.junit.jupiter.api.Test
 
 class ParserTest : CompilerTestBase() {
@@ -280,6 +280,6 @@ class ParserTest : CompilerTestBase() {
     }
 
     private fun assertEquals(actual: Stmt, vararg stmts: Stmt) {
-        assertEquals(Stmt.Program(span, Seq.with(*stmts)), actual, "AST 结构必须匹配")
+        assertAstEquals(Stmt.Program(span, Seq.with(*stmts)), actual, "AST 结构必须匹配")
     }
 }

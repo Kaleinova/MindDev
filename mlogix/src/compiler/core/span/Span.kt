@@ -63,34 +63,13 @@ class Span : Spanned {
 
     override fun toString(): String = "Span{${index},${start},${len}}"
 
-    /**
-     * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[bits],[index],[start]和[len]属性
-     *
-     * 要使用不忽略属性的相等判断，请使用[structuralEquals]
-     */
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        return true
-    }
-
-    fun structuralEquals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as Span
+        if (other !is Span) return false
         return bits == other.bits
     }
 
-    /**
-     * ⚠︎WARNING: 为了减少ASTNode相等判断的样板代码，本方法忽略Span的[bits],[index],[start]和[len]属性
-     *
-     * 要使用不忽略属性的方法，请使用[structuralHashCode]
-     */
     override fun hashCode(): Int {
-        return 0
-    }
-
-    fun structuralHashCode(): Int {
         return bits.hashCode()
     }
 }
