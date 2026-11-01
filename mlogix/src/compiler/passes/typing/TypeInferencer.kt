@@ -165,8 +165,8 @@ class TypeInferencer(val context: CompilerContext) {
      * 注解只支持单一枚举值；`set a : Int | Str` 这类多枚举值仍由 [annotationToType] 报 union-not-supported。
      */
     private fun analyzeSetVarStmt(stmt: Stmt.SetVar) {
-        val annotation = stmt.`var` as? Expr.Annotation
-        val declared = annotation?.let { TypeAnnotation(annotationToType(it), annotationToOrigin(it)) }
+        val typeAnnotation = stmt.`var` as? Expr.TypeAnnotation
+        val declared = typeAnnotation?.let { TypeAnnotation(annotationToType(it), annotationToOrigin(it)) }
         val symbol = unwrapIdentifier(stmt.`var`)?.defId?.let { symbolTable.get(it) }
 
         val assign = stmt.assign
@@ -451,7 +451,7 @@ class TypeInferencer(val context: CompilerContext) {
      * 返回值声明（`stmt.results`）→ 声明方信息（类型 + 来源树 + 声明 span）；没有声明时返回 null。
      *
      * 语法与建模的对应关系（返回值声明在解析期已被展平成 [Stmt.Fn.results] 的元素列表）：
-     * - 具名结果 `-> r : Int`：元素是 [Expr.Annotation]，类型取冒号后的类型表达式（`r` 只是结果名，
+     * - 具名结果 `-> r : Int`：元素是 [Expr.TypeAnnotation]，类型取冒号后的类型表达式（`r` 只是结果名，
      *   不参与类型构造）；
      * - 裸写结果 `-> Int`、`-> T`、`-> Array<Int>`：元素本身就是类型表达式（`?` 由解析期合成为
      *   `Null` 标识符，走同一条路）；
@@ -469,7 +469,7 @@ class TypeInferencer(val context: CompilerContext) {
         val types = Seq<Type>(results.size)
         val origins = Seq<TypeOrigin>(results.size)
         for (result in results) {
-            if (result is Expr.Annotation) {
+            if (result is Expr.TypeAnnotation) {
                 // 具名结果：类型是冒号后的类型表达式（多个枚举值由 annotationToType 报「暂不支持」）
                 types.add(annotationToType(result))
                 origins.add(annotationToOrigin(result))
@@ -538,7 +538,7 @@ class TypeInferencer(val context: CompilerContext) {
         val paramDeclInfo = Seq<TypeAnnotation>(stmt.params?.size ?: 0)
         stmt.params?.let { params ->
             for (p in params) {
-                if (p is Expr.Annotation) {
+                if (p is Expr.TypeAnnotation) {
                     val declType = annotationToType(p)
                     paramDeclInfo.add(TypeAnnotation(declType, annotationToOrigin(p)))
                     if (isGeneric) {
@@ -859,7 +859,7 @@ class TypeInferencer(val context: CompilerContext) {
                     paramDeclInfo.add(TypeAnnotation(selfType, TypeOrigin(p.span)))
                     continue
                 }
-                if (p is Expr.Annotation) {
+                if (p is Expr.TypeAnnotation) {
                     val declType = annotationToType(p)
                     paramDeclInfo.add(TypeAnnotation(declType, annotationToOrigin(p)))
                     if (isGeneric) {
@@ -1046,7 +1046,7 @@ class TypeInferencer(val context: CompilerContext) {
      * 结构体变体取冒号后类型表达式的来源（`height: Num` → `Num`），元组变体取类型表达式本身。
      */
     private fun variantFieldOrigin(field: Expr): TypeOrigin = when (field) {
-        is Expr.Annotation -> annotationToOrigin(field)
+        is Expr.TypeAnnotation -> annotationToOrigin(field)
         else -> variantToOrigin(field)
     }
 
@@ -1056,7 +1056,7 @@ class TypeInferencer(val context: CompilerContext) {
      * - 元组变体字段本身就是类型表达式 → [typeArgToType]。
      */
     private fun variantFieldToType(field: Expr): Type = when (field) {
-        is Expr.Annotation -> annotationToType(field)
+        is Expr.TypeAnnotation -> annotationToType(field)
         is Expr.Identifier -> typeArgToType(field)
 
         is Expr.Tuple -> {
@@ -1070,7 +1070,7 @@ class TypeInferencer(val context: CompilerContext) {
 
     /** 变体载荷字段名（仅诊断用）；元组变体字段没有名字 */
     private fun variantFieldNameOf(field: Expr): String = when (field) {
-        is Expr.Annotation -> (field.expr as? Expr.Identifier)?.let { identifierNameOf(it) } ?: ""
+        is Expr.TypeAnnotation -> (field.expr as? Expr.Identifier)?.let { identifierNameOf(it) } ?: ""
         is Expr.Identifier -> identifierNameOf(field)
         else -> ""
     }
@@ -1839,7 +1839,7 @@ class TypeInferencer(val context: CompilerContext) {
                 InferResult(Type.TupleType(elementTypes), combined, TypeOrigin(expr.span, elementOrigins))
             }
 
-            is Expr.Annotation -> {
+            is Expr.TypeAnnotation -> {
                 val r = inferExpr(expr.expr, expected)
                 InferResult(r.type, r.constraints, r.origin, r.expectedHandled)
             }
@@ -2056,15 +2056,15 @@ class TypeInferencer(val context: CompilerContext) {
      * - 单一枚举值（`a: Int`、`r: (Num, Str)`）→ 正常转换为 [Type]；
      * - 多个枚举值 → 报「暂不支持」错误并返回 [Type.Dummy]（抑制级联错误）。
      *
-     * @param annotation 形参/返回值的 `Expr.Annotation` 节点（内部注解即枚举值列表）
+     * @param typeAnnotation 形参/返回值的 `Expr.TypeAnnotation` 节点（内部注解即枚举值列表）
      * @return 注解对应的类型；无注解/无法转换时返回相应占位类型
      */
-    private fun annotationToType(annotation: Expr.Annotation): Type {
-        val variants = annotation.annotations
+    private fun annotationToType(typeAnnotation: Expr.TypeAnnotation): Type {
+        val variants = typeAnnotation.annotations
         if (variants.isEmpty) return BuiltinType.Unknown
         if (variants.size > 1) {
             error(bundle.get("diag.union-not-supported"))
-                .label(annotation, bundle.get("diag.union-not-supported.help"))
+                .label(typeAnnotation, bundle.get("diag.union-not-supported.help"))
             return Type.Dummy
         }
         return variantToType(variants[0])
@@ -2096,9 +2096,9 @@ class TypeInferencer(val context: CompilerContext) {
      *
      * 多个枚举值（`A | B`）已由 [annotationToType] 报「暂不支持」，这里退化为整体注解、不参与下钻。
      */
-    private fun annotationToOrigin(annotation: Expr.Annotation): TypeOrigin {
-        val variants = annotation.annotations
-        if (variants.size != 1) return TypeOrigin(annotation.span)
+    private fun annotationToOrigin(typeAnnotation: Expr.TypeAnnotation): TypeOrigin {
+        val variants = typeAnnotation.annotations
+        if (variants.size != 1) return TypeOrigin(typeAnnotation.span)
         return variantToOrigin(variants[0])
     }
 
@@ -2337,11 +2337,11 @@ class TypeInferencer(val context: CompilerContext) {
         return merged
     }
 
-    // 从 `Identifier` 或 `Annotation(Identifier, ...)` 中取出标识符
+    // 从 `Identifier` 或 `TypeAnnotation(Identifier, ...)` 中取出标识符
     private fun unwrapIdentifier(expr: Expr): Expr.Identifier? {
         return when (expr) {
             is Expr.Identifier -> expr
-            is Expr.Annotation -> expr.expr as? Expr.Identifier
+            is Expr.TypeAnnotation -> expr.expr as? Expr.Identifier
             else -> null
         }
     }
@@ -2350,7 +2350,7 @@ class TypeInferencer(val context: CompilerContext) {
     private fun unwrapSelfRef(expr: Expr): Expr.SelfRef? {
         return when (expr) {
             is Expr.SelfRef -> expr
-            is Expr.Annotation -> expr.expr as? Expr.SelfRef
+            is Expr.TypeAnnotation -> expr.expr as? Expr.SelfRef
             else -> null
         }
     }
