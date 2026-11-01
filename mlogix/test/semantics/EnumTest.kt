@@ -54,11 +54,11 @@ class EnumTest : CompilerTestBase() {
                     span,
                     Expr.Identifier(token(TokenType.IDENTIFIER, "Rect")),
                     Seq.with(
-                        Expr.TypeAnnotation(
+                        Expr.Annotation(
                             Expr.Identifier(token(TokenType.IDENTIFIER, "width")),
                             Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "Num"))),
                         ),
-                        Expr.TypeAnnotation(
+                        Expr.Annotation(
                             Expr.Identifier(token(TokenType.IDENTIFIER, "height")),
                             Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "Num"))),
                         ),

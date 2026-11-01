@@ -54,7 +54,7 @@ class StructTest : CompilerTestBase() {
                 Stmt.Struct.StructField(
                     span,
                     Expr.Identifier(token(TokenType.IDENTIFIER, "x")),
-                    Expr.TypeAnnotation(
+                    Expr.Annotation(
                         Expr.Identifier(token(TokenType.IDENTIFIER, "x")),
                         Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "Num"))),
                     ),
@@ -73,7 +73,7 @@ class StructTest : CompilerTestBase() {
                     token(TokenType.IDENTIFIER, "dist"),
                     null,
                     Seq.with(
-                        Expr.TypeAnnotation(
+                        Expr.Annotation(
                             Expr.Identifier(token(TokenType.IDENTIFIER, "a")),
                             Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "Num"))),
                         ),
