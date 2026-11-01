@@ -154,6 +154,9 @@
 
 - 面向用户的语法与速查指南：`docs/grammar/index.md`、`docs/grammar/fast-learning.md`。
 - 语义分析设计（约束生成 + 惰性求解）：`docs/design/semantic-analyzer.md`。
+- 游戏源码：`reference/Mindustry`（主要部分：`reference/Mindustry/core/src/mindustry/`）。
+- 游戏依赖库源码：`reference/Arc`（主要部分：`reference/Arc/arc-core/src/arc/`）。
+- 编译器架构 / IR 分层 / 目标机事实基线：`docs/design/compiler-architecture.md`（改分层或不变量时必须同步）。
 - 语言使用者文档与许可证：`mlogix/README.md`、`docs/`。
 
 ## 若还需更多上下文
