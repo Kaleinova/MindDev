@@ -2,10 +2,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | 草案 v0.1：分层骨架、递归方案、闭包方案、外部链接方案已定；宏模型与 effect 优化策略待定 |
+| 状态 | 草案 v0.4：分层、递归、闭包、`extern`、effect 保序、`Int`/`Num`、字符串常量拼接已定；第 1 章事实已对源码核验；`pragma` 语法待拍板 |
 | 适用范围 | `mlogix/src/compiler/` 及后续的中端/后端 |
 | 读者 | 编译器实现者、语言设计者、后续接手的 agent |
-| 维护约定 | 本文件中的**分层**、**不变量**、**决策（D1–D12）** 一旦改动，必须同步更新本文件，否则视为设计回归 |
+| 维护约定 | 本文件中的**分层**、**不变量**、**决策（D1–D20）** 一旦改动，必须同步更新本文件，否则视为设计回归 |
 | 相关文档 | [语义分析设计](semantic-analyzer.md)、[语法速通](../grammar/fast-learning.md) |
 
 ---
@@ -25,14 +25,14 @@
 ## 1. 目标环境事实基线
 
 > 这一节是**事实**，不是设计。凡是与游戏源码不符的地方，以源码为准并回改本节。
-> 标注 ⚠️ 的条目来自二手资料或用户口述，尚未逐条对照源码验证。
+> 标注 ⚠️ 的条目来自二手资料或用户口述，尚未逐条对照源码验证。v0.2/v0.3 已核验的条目见附录 D。
 
 ### 1.1 执行模型
 
-- 程序是**一维指令数组**，`@counter` 是索引，取指后自增。
+- 程序是**一维指令数组**，`@counter` 是索引。执行是 `instructions[counter.numval++].run()`——**先自增再执行**，所以指令执行期间 `@counter` 已经指向**下一条**。所有 `set @counter` / 相对寻址类技巧都要按这个偏移算。
 - 一行一条指令，指令名 + 若干参数，空格分隔。
 - 执行到最后一条后 `@counter` 越界，下一次取指自动重置为 0（**隐式无限循环**）。`end` 等价于把 `@counter` 设为 `length`。
-- **标签与注释不是指令**，不占数组位置，不计入指令数。
+- **标签与注释不是指令**，不占数组位置，不计入指令数。**标签由游戏解析**：`jump` 的目标写成标签名（非整数 token），游戏在导入时换成行号，编译器不必自己换算（见 6.6）。
   - 推论：CFG 的边（标签）是"免费"的，但 `jump` 指令本身要花钱。
   - 推论：文件末尾的裸标签会"踩空"（指向 `length`，行为不可靠），这是**必须检查的合法化规则**。
 - 每 tick 执行 `accumulator += edelta() * ipt`，当 `accumulator >= 1` 时执行一条并减 1。
@@ -57,14 +57,19 @@
 | 存储 | 容量 | 可存什么 | 访问方式 | 跨处理器 |
 | --- | --- | --- | --- | --- |
 | **变量槽** | 无限（写了名字就有） | number / object / string / null | 直接用名字，1 条指令 | 只能经 `read/write @this "名字"` |
-| Memory Cell | 64 槽 | ⚠️ 任意值（含对象） | `read`/`write` + **数字索引** | ✓ 共享建筑 |
-| Memory Bank | 512 槽 | ⚠️ 任意值（含对象） | `read`/`write` + **数字索引** | ✓ 共享建筑 |
+| Memory Cell | 64 槽 | 任意值（number 或 object） | `read`/`write` + **数字索引** | ✓ 共享建筑 |
+| Memory Bank | 512 槽 | 任意值（number 或 object） | `read`/`write` + **数字索引** | ✓ 共享建筑 |
+| world-cell | 512 槽 | 任意值（number 或 object） | 同上 | ✓ 特权建筑 |
 | 处理器变量表 | 无限 | 任意值 | `read`/`write @this "名字"` | ✓ 有 1 tick 帧差 |
 | 全局 flag | 无限 | number | `setflag`/`getflag`（仅 WORLD） | ✓ |
 | 单位 `flag` | 1 number / 单位 | number | `ucontrol flag` / `sensor @flag` | ✓ 分布式 |
 | 建筑字段 | — | number / object | `control` / `setprop` / `sensor` | ✓ |
 
-**关键修正（D9）**：早期资料称"内存块只能存 double"，**已过时**。当前按"cell/bank 可存任意值（含对象引用）"设计。这条影响三处：
+**关键修正（D9，已对源码确认）**：早期资料称"内存块只能存 double"，**已过时**。实现是 `Object[] objectMemory` + `double[] numberMemory` 两个并行数组 + 一个 `sentinel` 标记——**每个槽位是 tagged union**（要么 number 要么 object），初值为数字 `0`（`MemoryBlock.java:54-66`）。
+
+**容量不要硬编码**：`memoryCapacity` 在 `MemoryBlock` 里默认 **32**，由实例覆盖（cell 64 / bank 512 / world-cell 512）。而且 `sensor mem @memoryCapacity` 运行时可读（`MemoryBlock.sense`），所以 L3 布局层应当在运行时探测容量，而不是把 64/512 写死——模组改容量时也不会错。
+
+这条影响三处：
 
 1. `Array<Unit>` 等对象数组合法，数组不必降级成"只能装数字"。
 2. 闭包环境可以装箱进内存块，逃逸闭包在**数据层面**可行（成本转移到生命周期管理）。
@@ -75,10 +80,17 @@
 - **数值全是 double**。位运算强制转 `long` 再转回。`idiv` 是向下取整除法，`mod` 符号随被除数，`emod` 恒非负。
 - 三角函数输入/输出都是**度数**。
 - `equal`（`==`）有 `1e-6` 容差；`strictEqual`（`===`）无容差且要求类型一致。
-- 对象参与数值运算时 `num()` 返回 `1`（非 null）/ `0`（null）。所以对象"真值"可用，但算术无意义。
+- 对象参与数值运算时 `num()` 返回 `1`（非 null）/ `0`（null）。所以对象"真值"可用，但算术无意义。**注意 `null == 0` 为真**，判空只能用 `===`。
 - **写入常量变量会被静默忽略**：`set 10 5`、`set @time 0` 都不报错但无效。代码生成绝不能产出这类指令。
 - `noop` **占一个指令位**。
 - 未知指令会被解析成 `noop` 而非报错 —— 所以拼写错误是**静默**的，编译器应当自己把握这一风险。
+- **内存越界**：读返回 **`null`（对象）**，不是 `NaN`（`MemoryBlock.read`，注释明写 "instead of 0"）；写静默忽略。
+- **`sensor` 读不到的属性**：数值类返回 `NaN`（`default -> NaN`），对象类返回 `null`。而 NaN 一旦写回变量就会变成 `null`（见 6.1）。
+- **每行最多 16 个 token**（含指令名），超出直接报 "Line too long"。
+- **分词只按 6 个字符切**：`\n`、空格、`\t`、`#`、`;`、`"`。因此变量名的合法字符集几乎是"除这 6 个以外任意"，比常规标识符宽松得多；`;` 同时充当语句分隔符。
+- **`setrate` 只对特权处理器有效**：非特权调用被 clamp 到 `instructionsPerTick`（普通处理器无法提速）；只有 `WORLD` 覆盖了 `maxInstructionsPerTick = 1000`。
+- **`jump` 的目标有两种写法**：整数 → 行号；非整数 → 标签名，由游戏解析。标签**独占一行且以 `:` 结尾**，**不能是纯数字**（会被当成行号），最多 **500** 个，重名直接报错。
+- **特权指令在非特权处理器上会被静默丢弃**（解析成 `InvalidStatement`），不报错——所以"用了 `spawn` 却编译到普通处理器"必须在编译期拦住。
 
 ### 1.5 隐藏状态与副作用
 
@@ -87,22 +99,36 @@
 | # | 状态 | 位置 | 写 | 读 | 跨处理器 | 优化禁忌 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | `graphicsBuffer`（≤256） | 处理器私有 | `draw *` 追加 | `drawflush` 取走并清空 | ✗ | 命令流顺序敏感（`color`/`stroke`/`translate` 有状态），不可重排/合并 |
-| 2 | `textBuffer`（≤400 字符） | 处理器私有 | `print`/`printchar`/`format`/`localeprint` 追加 | `printflush`/`draw print`/`message` 取走并清空 | flush 后可见 | 同缓冲区内可合并；跨 flush 不可重排 |
+| 2 | `textBuffer`（≤400 字符） | 处理器私有 | `print`/`printchar`/`format`/`localeprint` 追加 | `printflush`/`draw print`/`message` 取走并清空 | flush 后可见 | 同缓冲区内可合并；跨 flush 不可重排。**不可读**，所以运行期无法做字符串拼接 |
 | 3 | `@counter` | 处理器私有 | `set`/`jump`/`end`/`stop`/`wait` | 取指 | 可被别的处理器远程改 | 控制效果，不能当纯值 |
 | 4 | `@unit` + `binds[typeId]` 计数器 | 处理器私有 | `ubind` | `ucontrol`/`uradar` | ✗ | **最危险**：连续两次 `ubind @mono` 绑到不同单位，CSE 会把"轮流控全部"退化成"只控一个" |
 | 5 | `memory[]` | 建筑级 | `write`/`setprop` | `read`/`sensor` | ✓ | 读者对编译器不可见，死写不能随便消 |
 | 6 | 实体/建筑字段 | 世界状态 | `ucontrol`/`control`/`setprop`/`status` | `sensor`/`uradar`/`ulocate` | ✓ | 有帧差与缓存，非纯函数 |
-| 7 | 隐藏缓存与计时器 | 处理器私有 | 指令自身 | 指令自身 | ✗ | `uradar`/`ulocate`/`radar` 有 **40 tick 缓存**；`wait` 有 `curTime`；`@time`/`@tick` 是 volatile |
+| 7 | 隐藏缓存与计时器 | 处理器私有 | 指令自身 | 指令自身 | ✗ | `uradar`/`ulocate`/`radar` 有 **30 tick 缓存**（`timer.get(30f)`）；`wait` 有 `curTime`；`@time`/`@tick` 是 volatile |
 
 **优化器必须把第 4、7 类建模成"读写同一个隐藏资源"**，否则会产生静默错误代码。
 
-### 1.6 多处理器与帧差
+**雷达缓存的粒度（源码确认）**：`RadarI` 的 `timer` / `lastTarget` / `lastSourceBuild` 是**指令实例自己的字段**，不是处理器的字段。所以：
 
-- 同一 tick 内，多个处理器**按固定顺序**依次执行完各自的配额。
-- 因此"同 tick 内 A 写、B 读"的结果取决于执行顺序；跨 tick 无歧义。
-- `uradar`/`ulocate`/`radar` 的 40 tick 缓存是**每处理器独立**的。
-- `drawflush`/`printflush`/`write`/`control` 涉及网络同步；`WORLD` 处理器在服务端执行。
-- 推论：**分区是有固定成本的**，跨分区通信至少 3–6 条指令，且引入顺序依赖。能不分就不分。
+- 同一条 `radar` 指令在 30 tick 内不重算；
+- **改 `sort` 参数不会立即生效**——时间没到就复用旧结果；
+- `target1/2/3` 在游戏编辑器里是**选择项而非变量**，运行时不可能变，所以它天然不参与"缓存键"。
+- 推论：把一条 `radar` 复制成两条**不会**共享缓存，各自的 timer 独立。
+
+### 1.6 执行与同步模型
+
+**两个不同的轴，不要混为一谈。**
+
+**(a) 单客户端内的处理器顺序**：同一 tick 内，多个处理器**按固定顺序**依次执行完各自的配额，所以"同 tick 内 A 写、B 读"的结果取决于执行顺序；跨 tick 无歧义。
+
+**(b) 跨客户端（多人）**：**逻辑在每个客户端上各自独立执行，所有语句都不同步**。"参数相同 → 结果相同"只是确定性，不是同步保证。游戏甚至专门提供了**故意不同步**的内置变量，例如 `@clientName`（当前客户端玩家名，仅 `WORLD` 可用）——`print @clientName` 在每个客户端会打印不同内容。
+
+**对编译器的含义**：
+
+- 编译器**不建模同步**，也不假设"同一变量在所有客户端一致"。这不是代码生成能解决的问题，而是逻辑作者的语义责任。
+- 需要一致性的状态，只能由逻辑自己写进**会被同步的建筑**（内存块 / 消息块 / 显示屏），而这些写入本身有延迟——这是独立课题，列入 1.8 的待验项。
+- 无头服务器上 `draw` 系列**完全不执行**（`Vars.headless` 短路），所以"客户端看到画面"与"服务端状态"本来就可以不同。
+- 分区推论不变：跨分区通信至少 3–6 条指令并引入顺序依赖，**能不分就不分**。
 
 ### 1.7 命名空间
 
@@ -117,14 +143,18 @@
 - 玩家在游戏里改建筑名 → 编译器**不可能静态知道**，所以外部建筑必须显式声明（见 8.5）。
 - 编译器生成的临时变量名必须有一套**不可碰撞的 mangling**（见 7.4）。
 - 跨处理器通信靠变量名当键 → **变量名是 ABI**，被导出的名字不能被重命名或合并。
+- **`@link` 名优先于用户变量**（同名时链接胜出）。这就是编译器临时变量必须用 `__` 前缀的直接理由。
 
-### 1.8 需要复核的事实
+### 1.8 仍需复核的事实
 
-- ⚠️ cell/bank 是否真的能存对象引用、对象跨处理器传递后的失效语义（单位死亡后引用变 `null` 还是 `NaN`）。
-- ⚠️ 不同游戏版本 `maxInstructions` 是否可变、是否受规则影响。
-- ⚠️ `read` 内存越界返回 `NaN`、`write` 越界静默忽略 —— 需确认在最新版本仍成立。
-- ⚠️ 40 tick 缓存的具体键（参数是否参与）。
-- ⚠️ 变量名允许的字符集（当前按 `[A-Za-z_][A-Za-z0-9_]*` 保守假设）。
+第 1.1–1.7 的条目已对照 `reference/Mindustry` 逐条核过（核实记录见附录 D）。剩下这些**要么依赖版本/模组，要么必须实测**：
+
+- 模组环境下的 content 数量与逻辑 ID 映射（`logicids.dat`）——会变，编译器不应硬编码。
+- 跨客户端同步的**具体边界**：哪些指令的写入会被同步、延迟多少、冲突时谁赢。1.6 只确定了"不同步"这一层，细节需要起服务器实测。
+- 建筑被摧毁后，持有其引用的变量读到什么。（单位已确认：字段冻结 + `@dead=1` + `@controlled=0` + `@controller=null`；建筑未验。）
+- `@clientName` 这类客户端变量的**完整清单**。
+- 内存块在多人模式下的序列化时机与带宽（大 bank 频繁写的影响）。
+- `world-cell` 的 `readable`/`writable` 规则是否与 `world-message` 一致。
 
 ---
 
@@ -132,7 +162,7 @@
 
 ### 2.1 前端已具备（AST 层）
 
-`fn`、`struct`（含字段默认值与方法）、`enum`（单元/元组/结构体变体）、`match`、`for`、`while`、`break`/`continue`（可带标签）、`use`（模块导入）、泛型、元组、数组字面量、索引、范围、`self` 隐式接收者、注解。
+`fn`、`struct`（含字段默认值与方法）、`enum`（单元/元组/结构体变体）、`match`、`for`、`while`、`break`/`continue`（可带标签）、`use`（模块导入）、泛型、元组、数组字面量、索引、范围、`self` 隐式接收者、**类型注解**（`Expr.Annotation`，形如 `x: Num`、`x: Num?`、`x: A | B`）。
 
 已有 6 个 PassId：`PARSING`、`RESOLUTION`、`DESUGAR`（空壳）、`TYPE_INFERENCE`、`DATAFLOW`（空壳）、`EXHAUSTIVENESS`。
 
@@ -143,19 +173,32 @@
 | 函数 | 已解析，未下降 | L2–L4 |
 | 结构体 | 已解析，未下降 | L3（SROA / 装箱） |
 | 闭包 | 未实现 | L2（转换）、L3（环境布局）、L4（间接调用） |
-| 宏 | **待定**，但编译期运算必须有 | L1 之前的 AST 级 |
+| 宏 | **comptime 先做**，语法宏后置 | L1 之前的 AST 级 |
 | `Array` / `Map` | 未实现，**语言可见** | L3（bank 映射、多 bank 拼接） |
 | 字符串一等值 | 未实现，**已定为一等值** | L2/L3（常量池、比较语义） |
 | 递归 | 未实现，**C 方案** | L2（SCC）、L3（栈帧） |
 | 自动分区 | 未实现，**已定为自动** | L5 |
+| 外部链接声明 `extern` | 未实现，**已定为独立关键字** | L1（符号表）+ L3（容量） |
 
 ### 2.3 明确不做 / 待定
 
 - **不做**：手写内联汇编块（至少 v1 不做；若要做，需要 L4 的"外部指令"节点与 liveness 屏障）。
 - **不做**：GC。内存块的槽位释放依赖逃逸分析与区域规则。
-- **待定**：宏模型（语法宏 / comptime / 两者）。
-- **待定**：`Map` 的表示（开放寻址？线性扫描？只允许小规模？）。
-- **待定**：整数与浮点是否在语言层区分（当前按"单一 `Num` = double"设计）。
+
+已定（对应第 11 节的 Q）：
+
+- **Q1**：宏先只做 comptime，语法宏后置。
+- **Q2**：effect 策略取**保序**，不做依赖图重排。
+- **Q3**：`Map` 先只支持小规模、键为数字，用线性扫描。
+- **Q5**：语言层区分 `Int` 与 `Num`，底层同为 double（见 6.1）。
+- **Q6**：分区后置到 M6，但 `AllocPlan`/`Budget` 预留字段。
+- **Q7**：内联阈值先设"函数体 ≤ 20 条且调用点 ≤ 3"，需实测调整。
+- **Q8**：变量名与链接名冲突 → 报错，不自动改名。
+- **Q9**：外部链接用独立关键字 `extern`，不复用 `use`。
+- **R1**：`Int / Int` → `div` 且返回 `Num`；溢出/除零运行时为 `null`（类型系统不跟踪）；`Num → Int` 用 `floor`。
+- **R2**：字符串只能**编译期常量拼接**（`@textBuffer` 不可读）。
+
+仍待细化：宏的卫生性与跨文件能力（R3）、编译期指令语法（R4）、分区是否建模客户端差异（R5）。
 
 ---
 
@@ -238,7 +281,7 @@ effect 是 IR 节点的结构属性，事后补要改所有节点与所有 pass�
 [L5 PIR] ──────────────── 分区层：多处理器切分 + 通信协议
   │  ASM_LAYOUT
   ▼
-[L6 ASM IR] ───────────── 汇编层：标签→行号，预算校验
+[L6 ASM IR] ───────────── 汇编层：标签分配，预算校验
   │  EMIT
   ▼
 mlog 文本 / 蓝图
@@ -252,7 +295,7 @@ mlog 文本 / 蓝图
 | L3 | MemIR | MIR → 程序 + 分配方案 | 聚合 → 显式地址；变量/内存/常量/栈/跳转表布局 | 每个值有唯一存储位置、容量已校验 | **"用内存换指令"的唯一决策点** |
 | L4 | AMIR | MemIR → 函数 | 指令选择、寻址、out-of-SSA、命名、peephole | 每条指令 1:1 可打印为一条 mlog | **目标机知识的唯一边界** |
 | L5 | PIR | AMIR 全程序 → 分区程序 | 跨处理器切分、通信、共享内存、时间均衡 | 每分区 ≤1000、跨分区只有显式边 | **唯一跨分区的全局视角** |
-| L6 | ASM IR | PIR → 指令序列 | 标签→行号、fall-through、预算校验、踩空检查 | 与最终文本一一对应，行号稳定 | **唯一知道最终行号的地方** |
+| L6 | ASM IR | PIR → 指令序列 | 标签分配与校验、fall-through、预算校验、数据段地址 | 与最终文本一一对应；控制流用标签 | **唯一知道最终文本形态的地方** |
 
 **最小可行子集**：L1 + L2 + L4 + L6 + Emit 即可跑通"函数 + 结构体 + 数组（单 bank）"。L3 可以先作为 L4 的一个子阶段存在，L5 最后做。但**目录与类型名一开始就按 6 层划分**，避免后期大搬家。
 
@@ -264,7 +307,7 @@ mlog 文本 / 蓝图
 2. **L3 之前不得出现具体地址/槽号**。槽位分配只发生在 L3。
 3. **L4 之后不得出现聚合值**。结构体/元组/枚举载荷必须是标量组或内存记录。
 4. **L5 之后不得改变单分区语义**。分区层只做"搬运 + 插通信"，不重新优化函数体（否则收益无法归因、bug 无法定位）。
-5. **L6 之后不得改变指令顺序**。行号一旦确定，任何重排都要重解标签与重定位。
+5. **L6 之后不得改变指令顺序**。标签本身不怕重排，但**数据段里的地址**（跳转表）会因重排失配。
 
 ---
 
@@ -297,6 +340,7 @@ mlog 文本 / 蓝图
 ```kotlin
 sealed class HirType {
     object Num : HirType()                       // double
+    object Int : HirType()                       // 逻辑整数，底层同为 double（D13）
     object Str : HirType()
     data class Obj(val contentKind: ContentKind) : HirType()
     data class Struct(val defId: DefId, val fields: Seq<HirType>) : HirType()
@@ -305,7 +349,39 @@ sealed class HirType {
     data class Func(val params: Seq<HirType>, val ret: HirType, val captures: Seq<HirType>) : HirType()
     data class Array(val element: HirType, val size: Int?) : HirType()   // size = null 表示动态
 }
+```
 
+**`Int` 的语义（D13 / D18）**：`Int` 与 `Num` 在 HIR 是两个类型，但**底层都是 double**——区分是纯语言层的，不产生运行时表示差异。
+
+已定：
+
+- 整数字面量与浮点字面量在**词法层就已区分**（`TokenType.INT` / `TokenType.NUM`）；
+- `Int → Num` 隐式（零成本）；
+- **`Num → Int` 用 `floor`**（不是 `round`），必须显式转换，不做静默截断；
+- **`Int / Int` 用 `div`，结果类型是 `Num`**——不是 `idiv`、也不是 `Int`，因为除零或溢出时结果是 `null`，`Int` 装不下；
+- **溢出与非法结果在运行时变成 `null`**。这是**运行时性质，类型系统不跟踪**。
+
+**对优化的直接约束**：既然 `Num` 在运行时可能是 `null`，就不能做"数学上成立但吃掉 null 情形"的折叠：
+
+- **恒等式全部非法**：`x + 0 → x`、`x * 1 → x`、`x / 1 → x` 都不成立——`x` 为 null 时原式得 `0`，而 `x` 本身是 null，`===` 能看出差别；
+- **会引入非有限中间值的化简非法**：`x / x → 1`、`0 / x → 0`（`x = 0` 时结果为 null）；
+- 反过来 `x - x → 0`、`x * 0 → 0` 是**合法**的（null 参与也确实得 0）；
+- 常量折叠必须按 `div` 的真实语义算，不能先折成代数恒等式。
+
+**`null` 怎么处理（D18 的配套）**：`Num` 在静态类型上**不可为 null**，因为这是运行时性质、类型系统不跟踪。
+
+**根源（源码确认）**：`LVar.setnum` 在写回时检查 `Double.isNaN || isInfinite`，命中就把变量变成 **`null`（对象）**（`LVar.java` 的 `setnum` / `invalid`）。所以：
+
+- **不止 `div`**：`0/0`、`x/0`、浮点溢出（`1e308 * 10`）、`sqrt(-1)`、`log(-1)`——**任何产生非有限 double 的运算，结果都会变成 null**；
+- `num()` 读取 null 时返回 **0**，于是 **`null == 0` 为真**（`==` 走数值路径时两边都取 `num()`）。要区分 null 和 0，必须用 **`===`**（`strictEqual` 比较 `isobj` 标志）；
+- 因此语言层的判空必须用 `===` 或专门的 `isNull`，`x == 0` 不能当判空。
+
+**语言策略**：
+
+- 不引入 `Num?`（会给所有算式加负担，收益极低），只提供兜底运算 `a ?? fallback`，降到 `select`（1 条指令）；
+- 编译器**不做"Num 一定有限"的假设**去优化（见上文的折叠约束）。
+
+```kotlin
 class HirFunction(
     val defId: DefId,
     val params: Seq<DefId>,
@@ -319,7 +395,7 @@ class HirProgram(
     val functions: Seq<HirFunction>,
     val structs: Seq<StructDecl>,
     val enums: Seq<EnumDecl>,
-    val links: Seq<LinkDecl>,         // 来自 use 声明
+    val links: Seq<LinkDecl>,         // 来自 extern 声明
     val comptimeValues: ObjectMap<String, ConstValue>,
 )
 ```
@@ -371,7 +447,7 @@ sealed class MirInst {
     data class Load(place: Place) : MirInst()
     data class Store(place: Place, value: MirValue) : MirInst()
     data class FieldGet(base: MirValue, fieldIndex: Int) : MirInst()
-    data class MakeStruct(defId: DefId, operands: Seq<MirValue>) : MirInst()
+    data class MakeStruct(defId: DefId, operands: Seq[MirValue]) : MirInst()
     data class MakeClosure(funcId: Int, captures: Seq[MirValue]) : MirInst()
     data class Call(target: Callee, args: Seq[MirValue], form: CallForm) : MirInst()
 }
@@ -449,7 +525,7 @@ class AllocPlan(
 - 每条 AMIR 指令可 1:1 打印成一条 mlog 文本行。
 - 控制流用标签表示，行号未知。
 - 无聚合值、无泛型、无闭包抽象。
-- 允许存在**重定位项**（`SymbolRef`），供 L6 解析。
+- 允许存在**重定位项**（`SymbolRef`），供 L6 解析（仅跳转表使用）。
 
 **为什么必须独立**：这是目标机知识的**唯一边界**。所有"mlog 长什么样"的知识收敛在这里，前端与中端完全不需要知道。
 
@@ -474,19 +550,18 @@ class AllocPlan(
 
 ### 6.6 L6 — ASM IR（线性汇编）
 
-**职责**：把一切都定死。
+**职责**：把控制流固定成文本，把预算算准。**不做标签换行号**——这一步交给游戏。
 
-1. **标签 → 行号**：解析所有跳转目标。
-2. **重定位**：常量池里的函数地址、跳转表项，在此解析成行号。
+1. **标签分配与校验**：生成标签名；查重；查"纯数字"（会被误当成行号）；查 `maxJumps = 500` 上限；查**踩空**（标签后必须至少跟一条指令，否则解析成 `length`）。
+2. **数据段地址（唯一的数字来源）**：只有跳转表需要数字，且由编译器在发射时自己算（三个方案见 8.2）。控制流本身从不出现数字目标。
 3. **预算校验**：`≤ maxInstructions`（1000）。超限必须报出**根因**（哪个函数、哪次内联、哪个数组访问展开贡献了多少条），而不是只报一个数字。
-4. **踩空检查**：末尾裸标签、指向 `length` 的跳转、`@counter` 越界语义。
-5. **变量名 mangling 落地**：处理与 `@` 环境变量、`@link` 名、关键字的碰撞。
-6. **fall-through 的最终确认**：行号一旦确定就不能再重排。
+4. **变量名 mangling 落地**：处理与 `@` 环境变量、`@link` 名、关键字的碰撞。
+5. **fall-through 的最终确认**：基本块顺序在写文本前定死。
 
 **不变量**
 
 - 与最终文本一一对应。
-- 行号稳定、可复现。
+- **控制流目标一律是标签**，不是数字；只有数据段可能出现数字地址。
 - 每条指令的 `Effects` 保留（供调试与后续验证）。
 
 ### 6.7 L7 — Emit
@@ -520,14 +595,14 @@ COUNTER, UNIT, VARIABLE(name), MEMORY(bankId), ENTITY, GLOBAL_TAG,
 GRAPHICS_BUFFER, TEXT_BUFFER, RADAR_CACHE, BIND_COUNTER, WAIT_TIMER, NETWORK
 ```
 
-**两条策略（D10 待最终确认）**
+**两条策略（D10 已定为 A：保序）**
 
 | 策略 | 判定方式 | 收益 | 风险 |
 | --- | --- | --- | --- |
-| **A. 严格保序**（v1 默认） | pass 顺序遍历，遇非 `PURE` 即切断 CSE/DCE 窗口 | 实现半天，拿到 ~80% 收益 | 无法跨副作用做 LICM |
+| **A. 严格保序**（选定） | pass 顺序遍历，遇非 `PURE` 即切断 CSE/DCE 窗口 | 实现半天，拿到 ~80% 收益 | 无法跨副作用做 LICM |
 | **B. Effect 依赖图** | 按 `(reads, writes)` 判可交换性 | 跨副作用重排/合并 | 漏一个隐藏状态就产生静默错误 |
 
-**推荐落地顺序**：IR 第一天就带 `Effects` 字段（结构属性，事后补代价极高），但优化只开策略 A。等下列 4 个回归用例通过后再开 B：
+**已定的落地方式（Q2 = 保序）**：IR 第一天就带 `Effects` 字段（结构属性，事后补代价极高），但优化只开策略 A；策略 B 不排期，只保留接口。下列 4 个回归用例在写 effect 分类表时就要建立：
 
 1. 连续两次 `ubind @mono` 不被合并（否则批量控制退化成单控）。
 2. `wait 0.1` 不被 DCE（否则节奏错乱）。
@@ -570,6 +645,7 @@ class Budget(
 | 递归帧指针 | `__sp` | 否（ABI） | `__sp` |
 | 跨处理器导出 | `__x` | **否** | `__x_done` |
 | 外部链接 | 玩家名 | **否** | `conveyor1` |
+| 标签 | `__L` | 是（但**不能是纯数字**） | `__L12` |
 
 规则：
 
@@ -582,6 +658,22 @@ class Budget(
 
 ## 8. 关键子系统
 
+### 8.0 三套语法域（先定边界，避免歧义）
+
+| 语法 | 作用域 | 何时求值 | 备注 |
+| --- | --- | --- | --- |
+| `:` | **类型**（`x: Num`） | 编译期 | 现有 `Expr.Annotation` 就是它，是**类型注解**，不是装饰器 |
+| `@` | **游戏内容 / 环境变量**（`@counter`、`@copper`） | **运行期** | Lexer 目前还没有 `@` token；一旦引入就归这个域 |
+| `pragma` | **编译期指令**（栈深度、目标 profile） | 编译期 | 新增关键字，只影响代码生成 |
+| `#` | 注释 | — | Lexer 已占用 |
+
+**`@` 不能再被复用为编译期指令**，理由有两条：
+
+1. 它必须是运行期取值（`@counter` 读出来是活的数字），而 `@depth(200)` 是编译期常量——同一 sigil 承载两种求值时机，读代码的人无法分辨。
+2. 这个项目已经踩过一次同类坑：颜色字面量之所以写成 `0%RRGGBB` 而不是 `%RRGGBB`，就是因为裸 `%` 被取模占了。**不要重复这个错误。**
+
+详见 8.7。
+
 ### 8.1 调用协议与递归（决策 D1：C 方案）
 
 **三种协议**
@@ -589,9 +681,19 @@ class Budget(
 | 协议 | 调用点开销 | 函数体开销 | 可递归 | 适用 |
 | --- | --- | --- | --- | --- |
 | `INLINE` | 0 | 函数体 × 调用点数 | — | 小函数、单调用点、热路径 |
-| `DIRECT`（无栈） | ~3 条（`set __ra_k <ret_k>` + `jump`；返回 `set @counter __ra_k`） | 0 膨胀 | ✗ | 非递归函数 |
+| `DIRECT`（无栈） | 2 条（`op add __ra_k @counter 1` + `jump f`；返回 `set @counter __ra_k`） | 0 膨胀 | ✗ | 非递归函数 |
 | `FRAME`（栈帧） | ~3 + n 条 | **×3~5 膨胀** | ✓ | 递归 SCC 内的函数 |
 | `INDIRECT`（闭包） | ~5–6 条（读 funcId + 查跳转表 + 保存返回地址 + `set @counter`） | 0 膨胀 | 取决于目标 | 闭包调用 |
+
+**返回地址怎么来（关键细节）**：`set` 的源操作数**不是标签**——只有 `jump` 的目标可以是标签。所以 `set __ra_k ret_k` 是**无效写法**（`ret_k` 会被当成一个变量名读，值是 0）。正确做法是靠 `@counter` 自定位：
+
+```
+i:    op add __ra_k @counter 1     # 执行期 @counter 已 = i+1，所以 __ra_k = i+2
+i+1:  jump f                        # 进函数体
+i+2:  <返回点>                      # 函数体末尾用 set @counter __ra_k 回到这里
+```
+
+`@counter` 是 `putVar` 注册的**普通变量**（与执行器内部 counter 是同一个 LVar），所以能当 `op` 的操作数读活值。这个技巧让调用协议**完全不依赖行号**，也对手工编辑 mlog 免疫。代价是每个调用点需要一个独立的 `__ra_k`（共享一个会在嵌套调用时被覆盖）。
 
 **为什么 FRAME 是 ×3~5 而不是 +几条**：logic 没有寄存器保存/恢复。递归重入会覆盖同名变量，所以帧内**所有局部变量与临时值都必须放到内存块**，每次访问变成"算地址 + `read`/`write`"。一条 `op add` 会变成 4–6 条。一个 30 条的函数会变成 90–150 条。**在 1000 条上限下这是决定性的**，所以绝不能让所有函数为"可能存在"的递归买单。
 
@@ -600,7 +702,7 @@ class Budget(
 1. 在 L2 构建调用图（含闭包调用边，保守连到所有可能的被调者）。
 2. Tarjan 求 SCC；`size > 1` 或存在自环的 SCC = **递归 SCC**。
 3. 递归 SCC 内的函数标记 `FRAME_BASED`；其余 `DIRECT` 或 `INLINE`。
-4. 跨 SCC 的调用：调用者若在 `FRAME` 里，自己已在内存中，安全；调用者若在 `DIRECT` 里，它的变量是全局命名的，被调者不会碰它们（被调者只用帧 + 自己的唯一命名临时），所以也安全。**唯一共享的寄存器是 `__sp` 与 `__ra`**。
+4. 跨 SCC 的调用：调用者若在 `FRAME` 里，自己已在内存中，安全；调用者若在 `DIRECT` 里，它的变量是全局命名的，被调者不会碰它们（被调者只用帧 + 自己的唯一命名临时），所以也安全。**唯一共享的寄存器是 `__sp`**——返回地址按调用点分开（见上），所以不会互相覆盖。
 
 **帧布局**
 
@@ -614,7 +716,7 @@ slot n+1..    : 局部变量与临时值（SSA 值一一对应）
 
 **深度与外部内存（决策 D12）**
 
-开发者声明需要的递归深度（语法待定，建议注解 `@depth(n)` 或配置项），编译器反推需要多少外部内存：
+开发者声明需要的递归深度（语法见 8.7，当前建议 `pragma stackDepth = 200`），编译器反推需要多少外部内存：
 
 ```
 帧大小 F      = 1（返回地址） + 参数数 + 局部/临时槽数（按 SSA 值数对齐）
@@ -626,7 +728,7 @@ slot n+1..    : 局部变量与临时值（SSA 值一一对应）
 反向也支持：开发者声明 `stack = 2 bank`，编译器算出 `D_max = floor(1024 / F)` 并**在编译期报告给用户**。
 
 - 默认行为：**静态计算 + 编译期告警**（不插运行时检查）。
-- 可选：`@depth_checked` 注解 → 插 2 条运行时检查（`op greaterThanEq __t __sp __limit` + `jump overflow`），换"不会静默踩坏内存"。
+- 可选：`pragma stackDepthChecked = true` → 插 2 条运行时检查（`op greaterThanEq __t __sp __limit` + `jump overflow`），换"不会静默踩坏内存"。
 - 若声明的内存不足 → **编译期报错**，并给出"需要 X 个 bank / 你声明了 Y 个"的明确信息。
 
 **尾调用**：`DIRECT` 协议下尾调用只需 `jump`，**天然支持无限深尾递归**，不需要占栈。所以"深度"这个问题对尾递归不存在——这也是 C 方案的一个免费红利。
@@ -656,12 +758,22 @@ record := [funcId, env0, env1, ...]
 **调用**
 
 1. 从记录读 `funcId`（1 条）。
-2. 查跳转表取目标地址（2–3 条）。
-3. 保存返回地址 + `set @counter`（2 条）。
+2. 取函数入口地址：查表（2–3 条）或走分派链（见下）。
+3. 保存返回地址 + 跳过去（2 条）。
 
-**跳转表与重定位（重要分层细节）**
+**间接调用怎么拿到"地址"（重要分层细节）**
 
-跳转表存的是**函数入口的行号**，而行号在 L6 才确定。所以跳转表在 L3/L4 是**符号引用**，到 L6 做**数据段重定位**。这一条必须写进 `Enum`/`Table` 的设计，否则会在 L4 就试图填行号而卡死。
+`jump` 支持标签，但 `set @counter` 只吃**数字**——所以间接调用必须有办法把 `funcId` 变成可跳转的目标。三种做法：
+
+| 方案 | 一次性成本 | 每次调用 | 手工改 mlog 后仍正确 | 备注 |
+| --- | --- | --- | --- | --- |
+| **A. 发射期算地址**（默认） | 0 | 查表 2–3 + 跳转 2 | ✗ 表项会失配 | 只有数据段用数字，控制流仍是标签；最简单最省 |
+| **B. 共享分派链** | 2N 条（N = 闭包数） | 2 条（跳分派器） | ✓ | 全标签、零数字；N 大时初始化段膨胀 |
+| **C. 运行时自建表** | 2N+3 条 | 同 A | ✓ 自校准 | 启动时用 `@counter` 记录各函数入口；注意执行期 `@counter` 已指向**下一条**，要减 1 |
+
+**默认选 A**：编译器在发射时本来就知道每个标签的最终行号，没必要让运行时再算一遍。只有"生成物会被手工编辑"的诉求变强时，才值得为 B/C 付初始化成本。
+
+> 选 A 后，**跳转表项是唯一需要"重定位"的东西**：L3/L4 里它们是符号引用，L6 发射时算成行号。这也正是 6.6 只保留"数据段地址"这一项数字工作的原因。
 
 **跨处理器限制（v1）**：闭包对象**禁止跨分区**。因为 `funcId` 是各处理器自己编译期的编号，跨处理器不通用。若将来要支持，需要在分区时建立"跨处理器函数编号表"，成本高、收益低。
 
@@ -689,7 +801,7 @@ record := [funcId, env0, env1, ...]
 
 ### 8.4 分区与通信（决策 D4）
 
-**输入**：AMIR 全程序、`target profile` 列表（来自 `use` 声明）、调用图、链接拓扑。
+**输入**：AMIR 全程序、`target profile` 列表（来自 `extern` 声明）、调用图、链接拓扑。
 
 **目标函数**：`min max_i(指令数_i / ipt_i)`，约束 `指令数_i ≤ 1000`，加上通信成本。
 
@@ -720,27 +832,27 @@ record := [funcId, env0, env1, ...]
 
 一次远程调用约 6–10 条指令 + 若干 tick 延迟。**所以只能粗粒度切分**（调用整段例程，不能每次循环迭代都远程调用）。这反过来约束了分区算法：只在"粗边界"（函数调用级）切开。
 
-### 8.5 外部链接声明（决策 D3：`use` 语法）
+### 8.5 外部链接声明（决策 D3：`extern` 关键字）
 
-`use` 现有形态是模块导入（`use a.b`、`use a.*`、`use a.**`、`use a.{x,y}`）。扩展为外部链接声明，用**类型注解**区分：
+`use` 保持只做模块导入（`use a.b`、`use a.*`、`use a.**`、`use a.{x,y}`）。外部链接改用**独立关键字 `extern`**（Q9 已定）：
 
 ```mlx
-use conveyor1                       # 模块导入（无类型注解）
-use a.b.*                           # 模块导入（路径形式）
+use a.b.*                           # 模块导入
 
-use bank1: Bank                     # 外部链接：512 槽内存
-use cell1: Cell                     # 外部链接：64 槽内存
-use cpu2: Processor<Hyper>          # 外部链接：参与分区的处理器
-use display1: Display               # 外部链接：显示屏
+extern conveyor1                    # 外部链接：按玩家起的名字引用
+extern bank1: Bank                  # 外部链接：内存建筑（容量运行时可读）
+extern cpu2: Processor<Hyper>       # 外部链接：参与分区的处理器
+extern display1: Display            # 外部链接：显示屏
 ```
 
 规则：
 
-1. `use X: Type` 中的 `X` 是**玩家在游戏里给建筑起的名字**，编译期作为不透明符号，运行期由游戏解析成 `@link` 名字。
-2. 名字**不可重命名、不可优化掉**，且必须做碰撞检测（与用户变量名同一个命名空间）。
+1. `extern X` / `extern X: Type` 中的 `X` 是**玩家在游戏里给建筑起的名字**，编译期作为不透明符号，运行期由游戏解析成 `@link` 名字。
+2. 名字**不可重命名、不可优化掉**；与用户变量名同在一个命名空间且**链接优先**（见 1.7），所以必须做碰撞检测（见 7.4）。
 3. `Processor<T>` 声明参与分区；未声明的处理器不参与。
-4. 容量信息（`Bank` = 512、`Cell` = 64）进入 L3 的 `AllocPlan`，用于静态容量校验与深度反推。
+4. **容量不在编译期写死**：`Bank`/`Cell` 只是"这是个内存建筑"的类型约束，真实容量在运行期用 `sensor mem @memoryCapacity` 读取（默认 32，cell 64 / bank 512 / world-cell 512）。L3 的静态校验按"最大可能容量"给**警告**，运行期再做兜底检查。
 5. 未声明的链接在代码中被引用 → **编译期报错**（而不是运行期静默变 `null`）。
+6. `use` 与 `extern` 不会解析冲突：前者是路径形式（`.`/`*`/`{}`），后者是"标识符 + 可选类型注解"。
 
 ### 8.6 栈深度与外部内存估算（决策 D12）
 
@@ -749,9 +861,9 @@ use display1: Display               # 外部链接：显示屏
 **用户视角**
 
 ```mlx
-use bank1: Bank
-use bank2: Bank
-@depth(200)          # 我预计最深递归 200 层
+extern bank1: Bank
+extern bank2: Bank
+pragma stackDepth = 200   # 我预计最深递归 200 层
 ```
 
 **编译器输出**
@@ -762,7 +874,38 @@ use bank2: Bank
 ⚠️ 声明的深度 200 超过可用容量 166，需要 3 个 bank
 ```
 
-**反向用法**：只声明内存，不声明深度 → 编译器算出 `D_max` 并**作为一条编译期信息报告**（不是错误，除非用户用了 `@depth_checked`）。
+**反向用法**：只声明内存、不声明深度 → 编译器算出 `D_max` 并**作为一条编译期信息报告**（不是错误，除非开了 `pragma stackDepthChecked`）。
+
+### 8.7 编译期指令（`pragma`）
+
+**问题**：`@depth(200)` 这类写法不能用——`@` 必须留给运行期的游戏内容与环境变量（见 8.0）。可选方案：
+
+| 方案 | 例 | 问题 |
+| --- | --- | --- |
+| `@depth(200)` | 拟作属性 | **`@` 与游戏内容冲突**，且编译期/运行期混在一个 sigil 里 |
+| `#[depth(200)]` | Rust 风格 | **`#` 是行注释**，词法层就死了 |
+| `set depth 200` | 复用关键字 | `set` 已是赋值语句关键字（`Stmt.SetVar`） |
+| 只给 CLI / 配置文件 | `--stack-depth 200` | 丢失"配置随代码走"的能力，评审时看不见 |
+| **`pragma name = value`** | 新关键字 | 无冲突；可扩展；可 grep |
+
+**建议（待确认，见 11.2 R4）**：新增一个顶层语句 `pragma`。
+
+```mlx
+pragma stackDepth = 200          # 递归深度
+pragma stackDepthChecked = true  # 是否插运行时溢出检查
+pragma target = WORLD            # 目标 profile（可被 CLI 覆盖）
+```
+
+规则：
+
+1. **文件级、与位置无关**（`RESOLUTION` 阶段收集），不参与作用域链。
+2. 值必须是编译期常量（字面量或常量表达式），不接受变量。
+3. **未知 pragma 名 → 报错**并给候选名（不要静默忽略，logic 的静默失败已经够多了）。
+4. 同名重复 → 后出现者覆盖，并给 warning。
+5. 只影响**代码生成**，不影响语义；因此可以安全地被 CLI 覆盖。
+6. **v1 只做全局 pragma，不做声明级属性**（`#[inline]` 之类）。等到确实需要逐函数调优时再设计，避免现在就冻结属性语法。
+
+**与 `Expr.Annotation` 的关系**：`Expr.Annotation` 是**类型注解**（`x: Num` 里的 `: Num`，以及 `x: T?` / `x: A | B` 的联合与可空），属于 8.0 表里的"类型"域，与 `pragma` 无关。文档里不再用"注解"一词指代编译期指令。
 
 ---
 
@@ -842,7 +985,7 @@ data class CompilerConfig(
     val mode: CompilationMode = CompilationMode.ALL,
     val optimize: Int = 0,
     val profile: TargetProfile = TargetProfile.LOGIC,   // 默认目标
-    val stackDepth: Int? = null,                        // @depth 等价物
+    val stackDepth: Int? = null,                        // pragma stackDepth 的等价物
     val maxInstructions: Int = 1000,
     val autoPartition: Boolean = true,
     val budgetReport: Boolean = false,
@@ -870,19 +1013,31 @@ data class CompilerConfig(
 
 ---
 
-## 11. 待定问题
+## 11. 决策与待定
 
-| # | 问题 | 影响 | 建议 |
+### 11.1 已定（本轮）
+
+| # | 问题 | 结论 |
+| --- | --- | --- |
+| Q1 | 宏模型 | 先只做 comptime（覆盖"编译期运算"需求），语法宏后置 |
+| Q2 | effect 优化策略 | **保序**，不做依赖图重排 |
+| Q3 | `Map` 表示 | 先只支持小规模、键为数字，线性扫描 |
+| Q4 | 字符串操作集 | 先只支持 `print`/比较/拼接（拼接机制待细化） |
+| Q5 | 整数 vs 浮点 | 语言层**区分** `Int` 与 `Num`，底层都是 double |
+| Q6 | 分区是否 v1 就做 | 后置到 M6，但 `AllocPlan`/`Budget` 预留字段 |
+| Q7 | 内联阈值 | 先设"函数体 ≤ 20 条且调用点 ≤ 3"，需实测调整 |
+| Q8 | 命名冲突 | 报错，不自动改名 |
+| Q9 | 外部链接语法 | 独立关键字 `extern`，不复用 `use` |
+| R1 | `Int` 的除法/溢出/转换 | `Int / Int` → `div`，返回 `Num`；溢出/除零运行时为 `null`（不跟踪）；`Num → Int` 用 `floor` |
+| R2 | 字符串拼接 | **仅编译期常量拼接**——`@textBuffer` 不可读，运行期没有拼接能力 |
+
+### 11.2 仍待定
+
+| # | 问题 | 为什么还没定 | 阻塞谁 |
 | --- | --- | --- | --- |
-| Q1 | 宏模型（语法宏 / comptime / 两者） | L1 之前 | 先做 comptime（能覆盖"编译期运算"需求），语法宏后置 |
-| Q2 | effect 优化策略（保序 / 依赖图） | L2 | 字段先加，策略先 A，4 个回归用例通过后开 B |
-| Q3 | `Map` 表示 | L3 | 先只支持小规模、键为数字的 `Map`，用线性扫描 |
-| Q4 | 字符串操作集（拼接/切片/比较） | L2/L3 | 字符串是对象，`op` 拿不到它；先只支持 `print`/比较/拼接（拼接可能需要额外机制） |
-| Q5 | 整数 vs 浮点在语言层是否区分 | L1 | 单一 `Num` = double，与现有 `Type` 对齐 |
-| Q6 | 分区是否 v1 就做 | L5 | 后置到 M6，但 `AllocPlan` 与 `Budget` 要为它预留字段 |
-| Q7 | 内联的代价阈值 | L2 | 需要实测：内联省 3 条/调用点，成本是函数体 × 调用点数；先设"函数体 ≤ 20 条且调用点 ≤ 3" |
-| Q8 | 变量名冲突的报错 vs 自动改名 | L6 | 用户变量与链接名冲突 → 报错（自动改名会破坏可读性） |
-| Q9 | `use` 的解析歧义（`use X: Type` vs `use a.b`） | L0 | 用 `:` 区分，Parser 加分支 |
+| R3 | 宏的卫生性与跨文件能力 | comptime 先做，但宏能否生成新标识符、能否跨文件 | L1 之前 |
+| R4 | 编译期指令的语法形态 | 已排除 `@`（游戏内容）与 `#`（注释）；建议顶层 `pragma name = value`，待你拍板 | L1 |
+| R5 | 分区层是否建模"客户端差异" | 1.6 已明确逻辑不同步；但分区后的跨处理器通信是否要区分客户端，未定 | L5 |
 
 ---
 
@@ -896,7 +1051,7 @@ data class CompilerConfig(
 | **帧（frame）** | 递归函数在内存块中的一块连续槽位 |
 | **静态记录** | 不逃逸闭包在编译期为每个创建点固定分配的一块记录，零运行时分配 |
 | **跳转表** | 存放函数入口地址的内存数组，用于间接调用；地址是 L6 的重定位项 |
-| **重定位（relocation）** | 把符号引用解析成最终行号的动作，发生在 L6 |
+| **重定位（relocation）** | 把数据段里的符号解析成最终行号；只用于跳转表，控制流本身不重定位 |
 | **踩空** | 跳转目标指向 `length`（末尾裸标签），`@counter` 越界被重置 |
 | **预算账本** | 贯穿各层的指令条数计数器 |
 | **下降（lowering）** | 从高抽象层变换到低抽象层 |
@@ -915,17 +1070,17 @@ data class CompilerConfig(
 | `set` | P | 目标为 `@counter` 时改判 `C`；目标为导出变量时加 `W(VARIABLE)` |
 | `jump` / `end` / `stop` | C | |
 | `wait` | C + H(WAIT_TIMER) | 不可 DCE |
-| `read` / `write`（cell/bank） | R/W(MEMORY) | 越界：读 NaN、写忽略 |
+| `read` / `write`（cell/bank） | R/W(MEMORY) | 越界：读 `null`、写忽略 |
 | `read` / `write`（`@this` 变量名） | R/W(VARIABLE) | 字符串键，跨处理器 |
-| `sensor` | R(ENTITY) | `@time`/`@tick`/`@counter` 为 volatile |
-| `radar` / `uradar` / `ulocate` | R(ENTITY) + H(RADAR_CACHE) | 40 tick 缓存 |
+| `sensor` | R(ENTITY) | `@time`/`@tick`/`@counter` 为 volatile；读不到时返回 NaN，写回变量后变 null |
+| `radar` / `uradar` / `ulocate` | R(ENTITY) + H(RADAR_CACHE) | 30 tick 缓存，指令实例级 |
 | `ubind` | W(UNIT) + H(BIND_COUNTER) | **绝不 CSE** |
 | `ucontrol` * | W(ENTITY) | 同时刷新控制计时器 |
 | `getlink` | R(LINKS) | |
 | `control` / `setprop` / `status` | W(ENTITY) | |
 | `draw` * | B(GRAPHICS_BUFFER) | 顺序敏感 |
 | `drawflush` | F(GRAPHICS_BUFFER) + W(ENTITY) | |
-| `print` / `printchar` / `format` / `localeprint` | B(TEXT_BUFFER) | 同缓冲区可合并 |
+| `print` / `printchar` / `format` / `localeprint` | B(TEXT_BUFFER) | 同缓冲区可合并；缓冲区不可读 |
 | `printflush` | F(TEXT_BUFFER) + W(ENTITY) | |
 | `message` | F(TEXT_BUFFER) + W(GLOBAL) | 仅 WORLD |
 | `setflag` / `getflag` | W/R(GLOBAL_TAG) | 仅 WORLD |
@@ -941,21 +1096,23 @@ data class CompilerConfig(
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 变量槽（无限）                                               │
-│   number(double) / object / string / null                    │
-│   名字 = 标识符；跨处理器需 read/write @this "名字"          │
+│ 变量槽（无限）                                              │
+│   number(double) / object / string / null                   │
+│   名字 = 标识符；跨处理器需 read/write @this "名字"         │
 ├─────────────────────────────────────────────────────────────┤
-│ Memory Cell  64 槽   ┐                                       │
-│ Memory Bank 512 槽   ├─ 建筑级，可被多个处理器链接 = 共享内存 │
-│   可存任意值（D9）；数字索引访问；越界读 NaN / 写忽略        │
+│ Memory Cell  64 槽   ┐                                      │
+│ Memory Bank 512 槽   ├─ 建筑级，可被多个处理器链接=共享内存 │
+│   可存任意值（D9）；数字索引访问；越界读 null / 写忽略      │
 ├─────────────────────────────────────────────────────────────┤
-│ 全局 flag（仅 WORLD）  number                                │
-│ 单位 flag              1 number / 单位                       │
+│ 全局 flag（仅 WORLD）  number                               │
+│ 单位 flag              1 number / 单位                      │
 ├─────────────────────────────────────────────────────────────┤
-│ 处理器私有：@counter / @unit / graphicsBuffer(256) /          │
-│             textBuffer(400) / radar 缓存(40 tick) / wait 计时 │
+│ 处理器私有：@counter / @unit / graphicsBuffer(256) /        │
+│             textBuffer(400) / radar缓存(30 tick) / wait 计时│
 └─────────────────────────────────────────────────────────────┘
 ```
+
+> 上图未画 `world-cell`（512 槽，特权），以及 `world-message` / `world-switch`——它们与普通版本同构，只是 `privileged = true`。
 
 ---
 
@@ -965,13 +1122,86 @@ data class CompilerConfig(
 | --- | --- | --- | --- |
 | D1 | 递归用 C 方案（SCC 按需栈帧），非递归函数用无栈调用点特化 | ✅ 已定 | 栈式递归使函数体 ×3~5，1000 条上限不可接受 |
 | D2 | 闭包 B 默认（记录 + 跳转表），A 作为逃逸分析优化 | ✅ 已定 | 表达力与成本平衡；跨处理器闭包 v1 禁止 |
-| D3 | `use X: Type` 作外部链接声明 | ✅ 已定 | 与模块导入用类型注解区分；避免动态名解析 |
+| D3 | `extern X[: Type]` 作外部链接声明 | ✅ 已定 | 不复用 `use`，避免与模块导入混淆 |
 | D4 | 超 1000 时自动分拆到多处理器 + `read/write` 通信 | ✅ 已定 | 用户明确选择 |
 | D5 | 4 档 target profile，编译期能力检查 | ✅ 已定 | `ipt` 差 500 倍，被动适配不可行 |
 | D6 | 语言暴露 `Array`/`Map`，映射 cell/bank + 多 bank 拼接 | ✅ 已定 | 用户明确选择 |
 | D7 | 字符串是一等值 | ✅ 已定 | 用户明确选择 |
 | D8 | DESUGAR 重做为 AST → HIR | ✅ 已定 | 分层干净；AST 只作语法层 |
-| D9 | cell/bank 可存任意值（含对象） | ✅ 已定（覆盖旧资料） | 用户更正 |
-| D10 | IR 带 effect 字段；v1 只做保序优化 | 🟡 默认待确认 | 字段后补代价极高；策略可渐进 |
-| D11 | 宏待定，但 comptime 必须有 | 🟡 待定 | 项目前期 |
+| D9 | cell/bank 可存任意值（含对象） | ✅ 已定（已对源码确认） | `objectMemory` + `numberMemory` + `sentinel` 做 tagged union |
+| D10 | IR 带 effect 字段；优化只做**保序** | ✅ 已定 | 字段后补代价极高；依赖图重排不排期 |
+| D11 | 宏：comptime 先做，语法宏后置 | 🟡 部分已定 | 项目前期；宏模型仍待 R3 |
 | D12 | 开发者声明递归深度 → 编译器折算所需外部内存 | ✅ 已定 | 用户明确选择 |
+| D13 | 语言层区分 `Int` 与 `Num`，底层同为 double | ✅ 已定 | 语义清晰、零运行时代价；降级细则见 D18 |
+| D14 | 逻辑在各客户端独立执行，编译器不建模同步 | ✅ 已定 | 游戏语义如此；同步是逻辑作者的责任 |
+| D15 | 雷达缓存 30 tick，且缓存挂在**指令实例**上 | ✅ 已定（源码确认） | `timer.get(30f)`；影响 effect 粒度与 CSE |
+| D16 | 跳转目标用**标签**，由游戏解析；编译器不产出数字跳转目标 | ✅ 已定 | `LParser` 原生支持标签，省掉全局重定位 |
+| D17 | 返回地址用 `@counter` 自定位（`op add __ra @counter 1`），不用行号 | ✅ 已定 | `set` 不吃标签；自定位同时让产物抗手工编辑 |
+| D18 | `Int / Int` → `div` 返回 `Num`；溢出/除零运行时为 `null`；`Num → Int` 用 `floor` | ✅ 已定 | 用户明确；`Int` 装不下 null，故返回 `Num` |
+| D19 | 字符串仅支持编译期常量拼接 | ✅ 已定 | `@textBuffer` 不可读，运行期无法取回 |
+| D20 | 编译期指令用顶层 `pragma name = value` | 🟡 建议待确认 | `@` 归游戏内容、`#` 是注释、`set` 已占用 |
+
+---
+
+## 附录 D：源码核实记录（v0.2 起）
+
+> 全部对照 `reference/Mindustry`。**标注"修正"的条目改掉了更早版本的原文。**
+
+| 事实 | 结论 | 位置 |
+| --- | --- | --- |
+| 四档 `ipt` | 2 / 8 / 25 / 8 | `content/Blocks.java:6898,6905,6916,7003` |
+| `WORLD` 的 `maxInstructionsPerTick` | **1000**（所以 `setrate` 上限确是 1000） | `Blocks.java:7007` |
+| 非特权 `setrate` | 被 clamp 到 `instructionsPerTick`，**不能提速** | `logic/LExecutor.java:1224` |
+| `maxInstructions` | 1000 | `LExecutor.java:40` |
+| `maxInstructionScale` | 5，且 `accumulator` 被截断 | `LogicBlock.java:45,557` |
+| 链接范围默认值 | `8 * 10`（logic/hyper 覆盖为 `8*22`/`8*42`，world 为 `MAX`) | `LogicBlock.java:49` |
+| `memoryCapacity` 默认 | **32**；实例覆盖 cell 64 / bank 512 / world-cell 512 | `MemoryBlock.java:17`、`Blocks.java:6924,6930,7016` |
+| 内存槽位模型 | `objectMemory` + `numberMemory` + `sentinel` = **tagged union**，初值 0 | `MemoryBlock.java:54-66` |
+| 越界读 | 返回 **`null`（对象）**（修正：原写 NaN） | `MemoryBlock.java:90-104` |
+| 越界写 | 静默忽略 | `MemoryBlock.java:112-114` |
+| 写只读常量 | `set` 与 `select` 都静默跳过 | `LExecutor.java:845,898` |
+| 雷达缓存 | **30 tick**（修正：原写 40），缓存在 `RadarI` 实例字段上 | `LExecutor.java` RadarI |
+| `graphicsBuffer` / `displayBuffer` / `textBuffer` | 256 / 1024 / 400 | `LExecutor.java:43-45` |
+| 消息建筑文本 | `maxTextLength = 400`、`maxNewlines = 24` | `MessageBlock.java:29-30` |
+| `draw` 参数打包 | `packSign` = 低 9 位 + 符号位 → **-511..511** | `LExecutor.java:1027` |
+| 每行 token 上限 | **16**，超出报 "Line too long" | `LParser.java:10,127` |
+| 分词分界符 | `\n`、空格、`\t`、`#`、`;`、`"`，其余字符都可进 token | `LParser.java:100` |
+| 单位死亡后的读取 | 字段冻结，`@dead=1`、`@controlled=0`、`@controller=null`；`sensor` 未知属性返回 `NaN` | `UnitComp.java:280,299,312` |
+| `LVar` 表示 | `isobj` 区分；字符串就是 `objval` 里的 `String` | `LVar.java:12-14` |
+| `@link` 与用户变量同名 | **链接优先** | 用户确认 + `LAssembler.putVar/putConst` |
+| `@counter` 时序 | `instructions[counter.numval++].run()` → **先自增再执行**，执行期 `@counter` 已指向下一条 | `LExecutor.java:118` |
+| `@counter` 可当操作数 | 由 `putVar` 注册为普通变量（与 `executor.counter` 同一 LVar），不是常量 | `LAssembler.java:22`、`LExecutor.java:135` |
+| 标签解析 | 单 token 且以 `:` 结尾；重名报错；上限 **`maxJumps = 500`** | `LParser.java:11,157-165` |
+| `jump` 目标 | 能 `parseInt` → 行号；否则 → 标签名，交给后期解析 | `LParser.java:170-173` |
+| 非特权处理器上的特权指令 | **静默替换为 `InvalidStatement`**，不报错 | `LParser.java:190-192` |
+| 非有限数的归宿 | `setnum` 遇 `isNaN \|\| isInfinite` → 写回 **`null`（对象）**；因此除零/溢出/`sqrt(-1)` 全都变 null | `LVar.java` `setnum` / `invalid` |
+| `null` 与 `0` | `num()` 把 null 读成 0 → **`null == 0` 为真**；只有 `===` 能区分 | `LVar.java` `num` / `setnum` |
+
+### v0.2 修正（对 v0.1）
+
+1. 雷达缓存 **40 tick → 30 tick**，粒度由"每处理器"改为"每条指令实例"。
+2. 内存越界读 **NaN → `null`**。
+3. 存储层级补齐 **`world-cell`**（并注明 `world-message`/`world-switch`）。
+4. 容量**不再硬编码**：默认 32、实例覆盖、运行时可 `sensor @memoryCapacity`。
+5. 外部链接声明 `use X: Type` → **`extern X[: Type]`**（Q9）。
+6. 新增 **`Int` / `Num` 语言层区分**（D13）。
+7. 1.6 由"多处理器与帧差"改写为**"执行与同步模型"**（D14，客户端独立执行）。
+8. 1.4 补充 token 上限、分词字符集、`setrate` 的真实约束。
+
+### v0.3 修正（对 v0.2）
+
+1. **L6 不再做"标签 → 行号"**（D16）：`jump` 直接写标签，由游戏在导入时解析。L6 只剩标签分配/校验、预算、数据段地址。
+2. **8.1 调用协议改为 `@counter` 自定位**（D17）：原文 `set __ra_k <ret_k>` 是**错的**——`set` 吃不到标签。正确写法是 `op add __ra_k @counter 1`。
+3. **8.2 间接调用给出 A/B/C 三方案**，默认 A（发射期算地址），并说明各自的编辑鲁棒性与成本。
+4. 1.1 / 1.4 补充：`@counter` 先自增再执行；标签必须独占一行、不能是纯数字、上限 500；**非特权处理器上的特权指令被静默丢弃**。
+5. 术语表「重定位」缩小为"只用于数据段"。
+
+### v0.4 修正（对 v0.3）
+
+1. **`div` 不是唯一来源**：`LVar.setnum` 把任何 NaN/Inf 都写成 null，所以溢出、`sqrt(-1)`、`log(-1)` 同样变 null（附录 D 补两条）。
+2. 由 `num()` 把 null 读成 0 推出 **`null == 0` 为真**，判空必须用 `===`。
+3. **修正 6.1 的折叠规则**：`x - x → 0`、`x * 0 → 0` 其实合法；真正非法的是恒等式（`x + 0 → x` 等）与 `x / x → 1`。
+4. 新增 **8.0 三套语法域**，明确 `:` / `@` / `pragma` / `#` 分属不同域。
+5. 新增 **8.7 编译期指令（`pragma`）**，替换原先的 `@depth` 写法（D20）。
+6. `Expr.Annotation` 明确为**类型/联合/可空标注**（`x: T?`、`x: A | B`），不是装饰器。
+7. 字符串限制为**编译期常量拼接**（D19）。
