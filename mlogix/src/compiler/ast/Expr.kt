@@ -53,10 +53,10 @@ abstract class Expr(span: Span) : ASTNode(span) {
     /**
      * 需要保证annotations.size > 0
      */
-    data class Annotation(
+    data class TypeAnnotation(
         val expr: Expr,
-        val annotations: Seq<Expr>
-    ) : Expr(Span.between(expr, annotations[annotations.size - 1]))
+        val types: Seq<Expr>
+    ) : Expr(Span.between(expr, types[types.size - 1]))
 
     /**
      * 一元运算

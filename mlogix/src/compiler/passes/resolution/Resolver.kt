@@ -188,8 +188,8 @@ class Resolver(private val context: CompilerContext) {
                 // 类型名仍要解析，供「类型名调用方法」（`Point.dist(p)`）解析到结构体符号
                 val selfRef = selfRefOf(p)
                 if (selfRef != null) {
-                    if (p is Expr.Annotation) {
-                        for (annotation in p.annotations) resolveAnnotationNames(annotation, fnScope)
+                    if (p is Expr.TypeAnnotation) {
+                        for (annotation in p.types) resolveAnnotationNames(annotation, fnScope)
                     }
                     continue
                 }
@@ -204,8 +204,8 @@ class Resolver(private val context: CompilerContext) {
         //   `defId`，类型推断阶段只能退化成 `Type.Dummy`，返回值注解事实上被忽略。
         stmt.results?.let { results ->
             for (result in results) {
-                if (result is Expr.Annotation) {
-                    for (variant in result.annotations) resolveAnnotationNames(variant, fnScope)
+                if (result is Expr.TypeAnnotation) {
+                    for (variant in result.types) resolveAnnotationNames(variant, fnScope)
                 } else {
                     resolveAnnotationNames(result, fnScope)
                 }
@@ -259,8 +259,8 @@ class Resolver(private val context: CompilerContext) {
 
         // 形参类型注解：这里只做「类型名 DefId」的名称解析。
         // 注解 Type 的转换与约束生成 TypeInferencer 完成（职责分离，resolveAnnotationNames）。
-        if (param is Expr.Annotation) {
-            for (variant in param.annotations) resolveAnnotationNames(variant, scope)
+        if (param is Expr.TypeAnnotation) {
+            for (variant in param.types) resolveAnnotationNames(variant, scope)
         }
     }
 
@@ -293,8 +293,8 @@ class Resolver(private val context: CompilerContext) {
             ident.defId = symbol?.id
         }
         // 变量类型注解中的类型名也要解析（`set a : Array<Int>` 里的 `Array` `Int`）
-        if (stmt.`var` is Expr.Annotation) {
-            for (variant in stmt.`var`.annotations) resolveAnnotationNames(variant, scope)
+        if (stmt.`var` is Expr.TypeAnnotation) {
+            for (variant in stmt.`var`.types) resolveAnnotationNames(variant, scope)
         }
         resolveStmt(stmt.assign, scope)
     }
@@ -341,7 +341,7 @@ class Resolver(private val context: CompilerContext) {
             // 每个变体独立子作用域：结构体变体的字段名在此登记（重复字段名即重复定义）
             val variantScope = enumScope.child()
             for (field in stmt.fieldsOf(variant)) {
-                if (field is Expr.Annotation) {
+                if (field is Expr.TypeAnnotation) {
                     // 结构体变体 `Named { name: Str }`：字段名是新定义，冒号后才是类型名
                     val fieldIdent = field.expr as? Expr.Identifier
                     if (fieldIdent != null) {
@@ -350,7 +350,7 @@ class Resolver(private val context: CompilerContext) {
                         declare(fieldName, BuiltinType.Unknown, fieldIdent.span, variantScope)
                             ?.let { fieldIdent.defId = it.id }
                     }
-                    for (annotation in field.annotations) resolveAnnotationNames(annotation, variantScope)
+                    for (annotation in field.types) resolveAnnotationNames(annotation, variantScope)
                 } else if (variant !is Stmt.Enum.EnumVariant.Struct) {
                     // 元组变体 `Rgb(Num, Num)`：载荷本身就是类型表达式
                     // （结构体变体缺少 `: 类型` 时 Parser 已报错，不再当类型名解析以免级联报错）
@@ -447,7 +447,7 @@ class Resolver(private val context: CompilerContext) {
                 for (e in expr.elements) resolveExpr(e, scope)
             }
 
-            is Expr.Annotation -> {
+            is Expr.TypeAnnotation -> {
                 // 只解析被注解的表达式主体；注解中的类型名由类型系统后续处理，
                 // 这里不解析，避免把类型名误报成未声明的标识。
                 resolveExpr(expr.expr, scope)
@@ -673,7 +673,7 @@ class Resolver(private val context: CompilerContext) {
 
             // 字段类型注解里的类型名（`x : Array<Int>` 的 `Array` `Int`）
             field.type?.let { type ->
-                for (annotation in type.annotations) resolveAnnotationNames(annotation, structScope)
+                for (annotation in type.types) resolveAnnotationNames(annotation, structScope)
             }
             field.default?.let { resolveExpr(it, defaultScope) }
         }
@@ -845,7 +845,7 @@ class Resolver(private val context: CompilerContext) {
 
     /**
      * 解析类型注解中的类型名（只做名称解析，不做类型推断）。
-     * 递归处理 Annotation/Identifier/TypePath 等类型表达式。
+     * 递归处理 TypeAnnotation/Identifier/TypePath 等类型表达式。
      */
     private fun resolveAnnotationNames(expr: Expr, scope: Scope) {
         when (expr) {
@@ -862,9 +862,9 @@ class Resolver(private val context: CompilerContext) {
                 expr.generics.let { args -> for (a in args) resolveAnnotationNames(a, scope) }
             }
 
-            is Expr.Annotation -> {
+            is Expr.TypeAnnotation -> {
                 resolveAnnotationNames(expr.expr, scope)
-                for (ann in expr.annotations) resolveAnnotationNames(ann, scope)
+                for (ann in expr.types) resolveAnnotationNames(ann, scope)
             }
 
             is Expr.Tuple -> {
@@ -896,7 +896,7 @@ class Resolver(private val context: CompilerContext) {
     private fun unwrapIdentifier(expr: Expr): Expr.Identifier? {
         return when (expr) {
             is Expr.Identifier -> expr
-            is Expr.Annotation -> expr.expr as? Expr.Identifier
+            is Expr.TypeAnnotation -> expr.expr as? Expr.Identifier
             else -> null
         }
     }
@@ -907,7 +907,7 @@ class Resolver(private val context: CompilerContext) {
     private fun selfRefOf(expr: Expr): Expr.SelfRef? {
         return when (expr) {
             is Expr.SelfRef -> expr
-            is Expr.Annotation -> expr.expr as? Expr.SelfRef
+            is Expr.TypeAnnotation -> expr.expr as? Expr.SelfRef
             else -> null
         }
     }

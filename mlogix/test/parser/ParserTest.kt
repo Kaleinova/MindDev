@@ -106,7 +106,7 @@ class ParserTest : CompilerTestBase() {
         val ast = parse("fn add(a:?(Num Str), b:d) -> r : ?(Num Int), msg : Str { return a + b }")
 
         val name = token(TokenType.IDENTIFIER, "add")
-        val aParam = Expr.Annotation(
+        val aParam = Expr.TypeAnnotation(
             Expr.Identifier(token(TokenType.IDENTIFIER, "a")),
             Seq.with(
                 Expr.Identifier(token(TokenType.IDENTIFIER, "Null")),
@@ -119,12 +119,12 @@ class ParserTest : CompilerTestBase() {
                 )
             ),
         )
-        val bParam = Expr.Annotation(
+        val bParam = Expr.TypeAnnotation(
             Expr.Identifier(token(TokenType.IDENTIFIER, "b")),
             Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "d"))),
         )
         val results = Seq.with<Expr>(
-            Expr.Annotation(
+            Expr.TypeAnnotation(
                 Expr.Identifier(token(TokenType.IDENTIFIER, "r")),
                 Seq.with(
                     Expr.Identifier(token(TokenType.IDENTIFIER, "Null")),
@@ -137,7 +137,7 @@ class ParserTest : CompilerTestBase() {
                     )
                 )
             ),
-            Expr.Annotation(
+            Expr.TypeAnnotation(
                 Expr.Identifier(token(TokenType.IDENTIFIER, "msg")),
                 Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "Str")))
             )
@@ -173,7 +173,7 @@ class ParserTest : CompilerTestBase() {
     fun `parse set with annotation and array literal`() {
         val ast = parse("set a : Int = {1, 2}")
 
-        val varExpr = Expr.Annotation(
+        val varExpr = Expr.TypeAnnotation(
             Expr.Identifier(token(TokenType.IDENTIFIER, "a")),
             Seq.with(Expr.Identifier(token(TokenType.IDENTIFIER, "Int")))
         )

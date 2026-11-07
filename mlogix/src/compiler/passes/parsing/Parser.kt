@@ -432,7 +432,7 @@ class Parser(
                         error(bundle.get("diag.miss-ident-as-param")).label(lookAhead(0))
                     }?.let {
                         val expr = annotation(Expr.Identifier(it))
-                        isSeparatorOptional = expr !is Expr.Annotation
+                        isSeparatorOptional = expr !is Expr.TypeAnnotation
                         return@let expr
                     }
                 },
@@ -477,7 +477,7 @@ class Parser(
                         }?.let {
                             // 名字后可以跟类型参数（`-> Array<Int>`）；写法与类型注解里的类型表达式一致
                             val expr = annotation(identifierWithGenerics(it))
-                            isSeparatorOptional = expr !is Expr.Annotation
+                            isSeparatorOptional = expr !is Expr.TypeAnnotation
                             return@let expr
                         }
                     },
@@ -654,7 +654,7 @@ class Parser(
 
         val annotation = annotation(ident)
         if (annotation is Expr.Dummy) return Stmt.Struct.StructField(annotation.span, ident, null, null)
-        val type = annotation as? Expr.Annotation
+        val type = annotation as? Expr.TypeAnnotation
 
         var default: Expr? = null
         val assign = assignStmt(ident)
@@ -826,7 +826,7 @@ class Parser(
                     }
                     val fieldName = next()
                     val field = annotation(Expr.Identifier(fieldName))
-                    if (field !is Expr.Annotation) {
+                    if (field !is Expr.TypeAnnotation) {
                         error(bundle.get("diag.miss-variant-field-type"))
                             .label(fieldName, "")
                     }
@@ -1400,7 +1400,7 @@ class Parser(
                     .label(subject.span.takeLast(subject.span.len - subject.token.span.len))
             }
             val enums = anonymousEnum() ?: return Expr.Dummy(between(colon, prevToken))
-            if (!enums.isEmpty) return Expr.Annotation(subject, enums)
+            if (!enums.isEmpty) return Expr.TypeAnnotation(subject, enums)
             // 如果标注数量为0，视作Identifier
         }
         return subject

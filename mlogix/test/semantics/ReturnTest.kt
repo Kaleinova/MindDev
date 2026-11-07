@@ -26,7 +26,7 @@ class ReturnTest : CompilerTestBase() {
 
     @Test
     fun `bare return annotation is recognized and enforced`() {
-        // 回归：此前 `-> Int` 不是 Expr.Annotation，返回值注解被整体忽略，这里不报错
+        // 回归：此前 `-> Int` 不是 Expr.TypeAnnotation，返回值注解被整体忽略，这里不报错
         assertEquals(1, analyze("""fn f() -> Int { return "s" }"""))
     }
 

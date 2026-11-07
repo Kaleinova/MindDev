@@ -104,7 +104,7 @@ abstract class Stmt(span: Span) : ASTNode(span) {
             override val span: Span,
             val name: Expr.Identifier,
             /** 冒号后的类型注解；省略类型时为 null（类型由默认值推断） */
-            val type: Expr.Annotation?,
+            val type: Expr.TypeAnnotation?,
             /** `= 默认值`；没有默认值时为 null（该字段构造时必须传入） */
             val default: Expr?,
         ) : ASTNode(span) {
