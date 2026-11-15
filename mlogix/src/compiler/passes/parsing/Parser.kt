@@ -1227,8 +1227,10 @@ class Parser(
             val id = next()
             return identifierWithGenerics(id)
         }
-        error(bundle.format("diag.miss-expression", lookAhead(0).type))
-            .label(lookAhead(0), "")
+        if (!check(TokenType.DUMMY)) {
+            error(bundle.format("diag.miss-expression", lookAhead(0).type))
+                .label(lookAhead(0), "")
+        }
         return Expr.Dummy(next().span)
     }
 
