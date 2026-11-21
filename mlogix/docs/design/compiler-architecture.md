@@ -319,6 +319,25 @@ mlog 文本 / 蓝图
 - **宏与 comptime 在这一层之前或在这一层上工作**（AST → AST），不产生新的 IR 层。
 - 一旦进入 L1，宏就应当已经展开完毕。
 
+#### 6.0.1 解析期定界符作用域（scope-stack）
+
+`Parser` 维护一个**定界符作用域栈**（`(` / `[` / `{` 的 `Scope`），与递归下降的调用栈同构：
+
+- 每个消耗开符的解析函数负责 `openScope(kind, opener)`，并在自己返回前闭合/弹出；
+  `kind` 同时给出期望闭合符与 `diag.scope.*` 文案（如「函数调用实参」）。
+- 闭合统一走 `closeIfMatched` / `expectClose`；遇到外层闭合符时 `abortOnForeignCloser`
+  只终结最内层，控制权交还外层——所以 `foo(1 }` 不会一路吞到文件结尾。
+- `recoverByTokenTree` 用真实栈判断闭合符归属：命中本层闭合符就停；无主闭合符报
+  `diag.unmatched-closer` 并丢弃；到 EOF 由各层各报一条 `diag.unclosed-delimiter`。
+- 缺闭合符的修复建议分三种：闭合符属于外层时**插入**（`foo(1 }` → `foo(1 )}`，外层照常闭合）；
+  无配对开符且处于表达式/列表层时**替换**（`print("a"}` → `print("a")`）；
+  无配对开符的语句体 stray 闭合符则报「多余」并丢弃。
+  插入语义下 `fn f() { foo(1 }` 会同时报「缺 `)`」与「多余 `}`」——这是必然结果，不是重复报错。
+- 约束：不预扫描 token（保持惰性 lexing）；快照只记录/恢复栈深度（`Snapshot.scopeDepth`）；
+  恢复路径必须保证向前推进，否则死循环。
+
+对应测试：`mlogix/test/parser/ParserRecoveryTest.kt`。
+
 ### 6.1 L1 — HIR（High-level IR，语义层）
 
 **职责**

@@ -174,6 +174,11 @@ enum class TokenType(private val keyword: String? = null) {
             LBRACE, RBRACE
         )
 
+        /** 闭合定界符：`(` / `[` / `{` 的配对项 */
+        val CLOSERS: Set<TokenType> = EnumSet.of(
+            RPAREN, RBRACKET, RBRACE
+        )
+
         val ASSIGNS: Set<TokenType> = EnumSet.of(
             ASSIGN,
             PLUS_ASSIGN, MINUS_ASSIGN, STAR_ASSIGN, SLASH_ASSIGN,

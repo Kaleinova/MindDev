@@ -33,6 +33,18 @@ class Parser(
     private val prevToken: Token get() = input.prevToken
 
     /**
+     * 尚未闭合的定界符作用域栈（`(` / `[` / `{`），由各解析函数在开闭处 push/pop。
+     *
+     * 它不参与 AST 构造，只服务两件事：
+     * - 报错时知道「正在解析哪个构造、是哪一层括号」（opener 位置 + 构造名）；
+     * - 错误恢复时知道「这个闭合符属于哪一层」，从而在本层缺括号时把控制权交还外层，
+     *   而不是一路吞到文件结尾。
+     *
+     * 注意：它与 Resolver 的语义作用域无关；快照回溯只需要记录/恢复栈深度。
+     */
+    private val scopes = Seq<Scope>(6)
+
+    /**
      * 一个文件 一次调用
      * 联动重置lexer，之后由 InputWindow 按需实时调用 lexer.scanToken() 扫描 Token
      */
@@ -40,6 +52,7 @@ class Parser(
         this.sourceFile = sourceFile
         lexer.reset(sourceFile)
         input = InputWindow()
+        scopes.clear()
         return program()
     }
 
@@ -49,32 +62,45 @@ class Parser(
         val stmts = Seq<Stmt>()
 
         while (!isAtEnd) {
+            val before = lookAhead(0).span.start
             val stmt = statement()
             if (stmt != null) {
                 stmts.add(stmt)
             }
+            // 防御：非 EOF 处不允许原地打转（作用域栈万一泄漏，也不至于死循环）
+            if (lookAhead(0).span.start == before && !isAtEnd) next()
         }
 
         return Stmt.Program(Span(sourceFile.index, 0, sourceFile.length()), stmts)
     }
 
-    private fun statement(): Stmt? = when {
-        check(TokenType.USE) -> useStmt()
-        check(TokenType.IF) -> ifStmt()
-        check(TokenType.MATCH) -> matchStmt()
-        check(TokenType.FOR) -> forStmt(null)
-        check(TokenType.WHILE) -> whileStmt(null)
-        check(TokenType.FN) -> fnStmt()
-        check(TokenType.LBRACE) -> block()
-        check(TokenType.BREAK) -> breakStmt()
-        check(TokenType.CONTINUE) -> continueStmt()
-        check(TokenType.RETURN) -> returnStmt()
-        check(TokenType.SET) -> setStmt()
-        check(TokenType.STRUCT) -> structStmt()
-        check(TokenType.ENUM) -> enumStmt()
+    private fun statement(): Stmt? {
+        // 换行后紧跟闭合符时，换行不属于任何语句
+        if (lookAhead(0).type == TokenType.NEWLINE && isCloser(lookAhead(1).type)) next()
+        val token = lookAhead(0)
+        if (TokenType.CLOSERS.contains(token.type)) {
+            // 闭合符不是语句：无主的报「多余」，有主的留给外层作用域闭合，这里返回空语句
+            if (findScopeByCloser(token.type) == null) reportUnmatchedCloser(next())
+            return null
+        }
+        return when {
+            check(TokenType.USE) -> useStmt()
+            check(TokenType.IF) -> ifStmt()
+            check(TokenType.MATCH) -> matchStmt()
+            check(TokenType.FOR) -> forStmt(null)
+            check(TokenType.WHILE) -> whileStmt(null)
+            check(TokenType.FN) -> fnStmt()
+            check(TokenType.LBRACE) -> block()
+            check(TokenType.BREAK) -> breakStmt()
+            check(TokenType.CONTINUE) -> continueStmt()
+            check(TokenType.RETURN) -> returnStmt()
+            check(TokenType.SET) -> setStmt()
+            check(TokenType.STRUCT) -> structStmt()
+            check(TokenType.ENUM) -> enumStmt()
 
-        else -> {
-            loopStmtWithLabel() ?: exprStmt()
+            else -> {
+                loopStmtWithLabel() ?: exprStmt()
+            }
         }
     }
 
@@ -110,15 +136,29 @@ class Parser(
 
                 check(TokenType.LBRACE) -> {
                     val lbrace = next()
+                    val scope = openScope(ScopeKind.USE_LIST, lbrace)
 
                     val items = Seq<Stmt.Use.UseItem>()
-                    while (!match(TokenType.RBRACE)) {
+                    while (true) {
+                        if (closeIfMatched(scope)) {
+                            next()
+                            break
+                        }
+                        if (isAtEnd) {
+                            reportMissingCloser(scope, lookAhead(0))
+                            break
+                        }
+                        if (isCloser(lookAhead(0).type)) {
+                            if (abortOnForeignCloser(scope)) break
+                            continue
+                        }
                         val item = useItem()
                         if (item == null) {
+                            // 列表项解析失败：本层无法继续，报缺失闭合符后交还控制权
+                            reportMissingCloser(scope, lookAhead(0))
                             break
-                        } else {
-                            items.add(item)
                         }
+                        items.add(item)
                         match(TokenType.COMMA)
                     }
                     return Stmt.Use.Multi(between((if (path.isEmpty) lbrace else path[0]), prevToken), path, items)
@@ -135,20 +175,25 @@ class Parser(
 
     private fun block(): Stmt {
         val lBrace = next()
+        val scope = openScope(ScopeKind.BLOCK, lBrace)
 
         val stmts = Seq<Stmt>()
-        while (!check(TokenType.RBRACE)) {
+        while (true) {
+            if (closeIfMatched(scope)) {
+                val rBrace = next()
+                return Stmt.Block(between(lBrace, rBrace), stmts)
+            }
             if (isAtEnd) {
-                error(bundle.get("diag.miss-block-end"))
-                    .label(lBrace, bundle.get("diag.start"))
-                    .label(lookAhead(0), bundle.get("diag.current"))
+                reportMissingCloser(scope, lookAhead(0))
                 return Stmt.Block(between(lBrace, prevToken), stmts)
+            }
+            // 出现闭合符：要么属于外层（本层缺 `}`，提前返回），要么是多余的（报告后丢弃）
+            if (isCloser(lookAhead(0).type)) {
+                if (abortOnForeignCloser(scope)) return Stmt.Block(between(lBrace, prevToken), stmts)
+                continue
             }
             statement()?.let { stmts.add(it) }
         }
-        val rbrace = next()
-
-        return Stmt.Block(between(lBrace, rbrace), stmts)
     }
 
     private fun ifStmt(): Stmt? {
@@ -187,31 +232,41 @@ class Parser(
             return null
         }
 
-        if (consume(TokenType.LBRACE) == null) {
+        val lBrace = consume(TokenType.LBRACE)
+        if (lBrace == null) {
             error(bundle.get("diag.miss-match-brace"))
                 .label(start, bundle.get("diag.stmt-start"))
                 .label(lookAhead(0), bundle.get("diag.current"))
             return Stmt.Match(between(start, scrutinee), scrutinee, null)
         }
+        val scope = openScope(ScopeKind.MATCH_BODY, lBrace)
 
         val branches = Seq<Stmt.Match.MatchBranch>()
         while (true) {
             // 分支之间允许任意换行（`check` 只在「位于换行后的下一个 token 是目标类型」时才跳过换行）
             while (lookAhead(0).type == TokenType.NEWLINE) next()
 
-            if (check(TokenType.RBRACE)) {
+            if (closeIfMatched(scope)) {
                 next()
                 break
             }
             if (isAtEnd) {
-                error(bundle.get("diag.miss-match-end"))
-                    .label(start, bundle.get("diag.stmt-start"))
-                    .label(lookAhead(0), bundle.get("diag.current"))
+                reportMissingCloser(scope, lookAhead(0))
                 return Stmt.Match(
                     between(start, (if (branches.isEmpty) start else branches[branches.size - 1])),
                     scrutinee,
                     branches,
                 )
+            }
+            if (isCloser(lookAhead(0).type)) {
+                if (abortOnForeignCloser(scope)) {
+                    return Stmt.Match(
+                        between(start, (if (branches.isEmpty) start else branches[branches.size - 1])),
+                        scrutinee,
+                        branches,
+                    )
+                }
+                continue
             }
             val pattern = pattern()
             if (pattern == null) {
@@ -227,13 +282,23 @@ class Parser(
                 continue
             }
 
-            if (consume(TokenType.ARROW) == null) {
+            if (check(TokenType.ARROW)) {
+                next()
+            } else {
+                // 缺 `->`：若当前已是闭合符（例如模式载荷缺 `)` 已报过错），直接跳过该分支，避免级联
+                if (!isCloser(lookAhead(0).type)) {
+                    error(bundle.format("diag.miss-token", TokenType.ARROW))
+                        .label(lookAhead(0), TokenType.ARROW.toString())
+                }
                 when (recoverByTokenTree(EnumSet.of(TokenType.NEWLINE, TokenType.RBRACE))) {
-                    TokenType.EOF -> return Stmt.Match(
-                        between(start, (if (branches.isEmpty) start else branches[branches.size - 1])),
-                        scrutinee,
-                        branches,
-                    )
+                    TokenType.EOF -> {
+                        reportMissingCloser(scope, lookAhead(0))
+                        return Stmt.Match(
+                            between(start, (if (branches.isEmpty) start else branches[branches.size - 1])),
+                            scrutinee,
+                            branches,
+                        )
+                    }
 
                     else -> continue
                 }
@@ -297,16 +362,21 @@ class Parser(
      */
     private fun patternArgs(): Seq<Pattern> {
         val lParen = next()
+        val scope = openScope(ScopeKind.PATTERN_ARGS, lParen)
         val args = Seq<Pattern>(3)
         while (true) {
-            if (check(TokenType.RPAREN)) {
+            if (closeIfMatched(scope)) {
                 next()
                 return args
             }
             if (isAtEnd) {
-                error(bundle.get("diag.miss-pattern-args-end"))
-                    .label(lParen, bundle.get("diag.variant-pattern-start"))
-                    .label(lookAhead(0), bundle.get("diag.current"))
+                reportMissingCloser(scope, lookAhead(0))
+                return args
+            }
+            if (abortOnForeignCloser(scope)) return args
+            // 语句起始 token 不可能出现在模式实参位置：本层缺 `)`
+            if (isStatementStart(lookAhead(0).type)) {
+                reportMissingCloser(scope, lookAhead(0))
                 return args
             }
             val before = lookAhead(0).span.start
@@ -315,7 +385,7 @@ class Parser(
             // 分隔符：`,` / 换行 / 空格皆可；若这一轮没有推进，强制推进一格防止死循环
             match(TokenType.COMMA)
             matchStmtEnd()
-            if (lookAhead(0).span.start == before && !check(TokenType.RPAREN)) next()
+            if (lookAhead(0).span.start == before && !check(scope.closer)) next()
         }
     }
 
@@ -346,11 +416,8 @@ class Parser(
         }
 
         if (expect(TokenType.LBRACE) { e: Diagnostic -> e.label(head, bundle.get("diag.for-stmt")) } == null) {
-            when (recoverByTokenTree(EnumSet.of(TokenType.RBRACE))) {
-                TokenType.RBRACE -> error(bundle.get("diag.unmatched-delimiter")).label(next(), "")
-                TokenType.EOF -> Unit
-                else -> kotlin.error("Unreachable")
-            }
+            // 缺 `{`：只跳到行尾或外层 `}`，不吞掉后续语句
+            if (!isStmtEnd) recoverByTokenTree(EnumSet.of(TokenType.RBRACE, TokenType.NEWLINE))
             return Stmt.For(between(start, expr ?: varDecl!!), flag, varDecl, expr, null)
         }
         val body = block()
@@ -370,11 +437,8 @@ class Parser(
         }
 
         if (expect(TokenType.LBRACE) { e: Diagnostic -> e.label(head, bundle.get("diag.while-stmt")) } == null) {
-            when (recoverByTokenTree(EnumSet.of(TokenType.RBRACE))) {
-                TokenType.RBRACE -> error(bundle.get("diag.unmatched-delimiter")).label(next(), "")
-                TokenType.EOF -> Unit
-                else -> kotlin.error("Unreachable")
-            }
+            // 缺 `{`：只跳到行尾或外层 `}`，不吞掉后续语句
+            if (!isStmtEnd) recoverByTokenTree(EnumSet.of(TokenType.RBRACE, TokenType.NEWLINE))
             return Stmt.While(between(start, expr), flag, expr, null)
         }
         val body = block()
@@ -424,6 +488,7 @@ class Parser(
         var parameters: Seq<Expr>? = null
         if (check(TokenType.LPAREN)) {
             val lParen = next()
+            val scope = openScope(ScopeKind.FUNC_PARAMS, lParen)
 
             var isSeparatorOptional = false
             parameters = seq(
@@ -445,12 +510,12 @@ class Parser(
                 },
                 TokenType.RPAREN,
                 true,
-                {
-                    error(bundle.get("diag.miss-param-end"))
-                        .label(lookAhead(0))
-                        .label(lParen, bundle.get("diag.param-start"))
-                }
+                scope = scope,
             )
+            // 形参表缺 `)` 且遇到外层闭合符：整个函数声明在此结束，不再解析返回值与函数体
+            if (scope.aborted) {
+                return Stmt.Fn(between(start, prevToken), name, typeParams, parameters, Seq(0), null)
+            }
         }
 
         val results = Seq<Expr>(3)
@@ -596,11 +661,22 @@ class Parser(
         val methods = Seq<Stmt.Fn>(3)
         if (check(TokenType.LBRACE)) {
             end = next()
+            val scope = openScope(ScopeKind.STRUCT_BODY, end)
             var isCommaOptional = true
             while (true) {
-                if (check(TokenType.RBRACE)) {
+                if (closeIfMatched(scope)) {
                     end = next()
                     break
+                }
+                if (isAtEnd) {
+                    reportMissingCloser(scope, lookAhead(0))
+                    end = prevToken
+                    break
+                }
+                if (isCloser(lookAhead(0).type)) {
+                    end = prevToken
+                    if (abortOnForeignCloser(scope)) break
+                    continue
                 }
                 if (check(TokenType.IDENTIFIER)) {
                     if (!isCommaOptional) {
@@ -618,16 +694,19 @@ class Parser(
                     error(bundle.get("diag.miss-struct-item"))
                         .label(lookAhead(0))
                     when (recoverByTokenTree(TokenType.RECOVERY)) {
-                        TokenType.RBRACE -> return Stmt.Struct(
-                            between(start, next()),
-                            Expr.Identifier(name),
-                            typeParams,
-                            fields,
-                            methods
-                        )
+                        TokenType.RBRACE -> {
+                            closeIfMatched(scope)
+                            end = next()
+                            break
+                        }
 
                         TokenType.FN -> methods.add(fnStmt())
-                        else -> break
+                        else -> {
+                            // 遇到新语句/其它同步点：本结构体缺 `}`，报错并交还外层
+                            reportMissingCloser(scope, lookAhead(0))
+                            end = prevToken
+                            break
+                        }
                     }
                 }
             }
@@ -717,17 +796,22 @@ class Parser(
         val variants = Seq<Stmt.Enum.EnumVariant>(4)
         if (check(TokenType.LBRACE)) {
             end = next()
+            val scope = openScope(ScopeKind.ENUM_BODY, end)
             var isSeparatorOptional = true
             while (true) {
-                if (check(TokenType.RBRACE)) {
+                if (closeIfMatched(scope)) {
                     end = next()
                     break
                 }
                 if (isAtEnd) {
-                    error(bundle.get("diag.miss-enum-end"))
-                        .label(start, bundle.get("diag.stmt-start"))
-                        .label(lookAhead(0), bundle.get("diag.current"))
+                    reportMissingCloser(scope, lookAhead(0))
+                    end = prevToken
                     break
+                }
+                if (isCloser(lookAhead(0).type)) {
+                    end = prevToken
+                    if (abortOnForeignCloser(scope)) break
+                    continue
                 }
                 if (check(TokenType.IDENTIFIER)) {
                     if (!isSeparatorOptional) {
@@ -742,8 +826,9 @@ class Parser(
                         .label(lookAhead(0))
                     when (recoverByTokenTree(TokenType.RECOVERY)) {
                         TokenType.RBRACE -> {
+                            closeIfMatched(scope)
                             end = next()
-                            return Stmt.Enum(between(start, end), Expr.Identifier(name), typeParams, variants)
+                            break
                         }
 
                         TokenType.IDENTIFIER -> {
@@ -751,7 +836,12 @@ class Parser(
                             isSeparatorOptional = match(TokenType.COMMA) || matchStmtEnd()
                         }
 
-                        else -> break
+                        else -> {
+                            // 遇到其它同步点：本枚举缺 `}`，报错并交还外层
+                            reportMissingCloser(scope, lookAhead(0))
+                            end = prevToken
+                            break
+                        }
                     }
                 }
             }
@@ -783,6 +873,7 @@ class Parser(
         // 元组变体 `Rgb(Num, Num, Num)`
         if (check(TokenType.LPAREN)) {
             val lParen = next()
+            val scope = openScope(ScopeKind.VARIANT_FIELDS, lParen)
             val fields = seq(
                 { identifier() },
                 EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
@@ -794,11 +885,7 @@ class Parser(
                 },
                 TokenType.RPAREN,
                 true,
-                {
-                    error(bundle.get("diag.miss-variant-field-end"))
-                        .label(lookAhead(0))
-                        .label(lParen, bundle.get("diag.variant-field-start"))
-                }
+                scope = scope,
             )
             return Stmt.Enum.EnumVariant.Tuple(between(variantName, prevToken), ident, fields)
         }
@@ -806,18 +893,23 @@ class Parser(
         // 结构体变体 `Named { name: Str, alpha: Num }`
         if (check(TokenType.LBRACE)) {
             val lBrace = next()
+            val scope = openScope(ScopeKind.VARIANT_BODY, lBrace)
             val fields = Seq<Expr>(4)
             var isCommaOptional = true
             while (true) {
-                if (check(TokenType.RBRACE)) {
+                if (closeIfMatched(scope)) {
                     val rBrace = next()
                     return Stmt.Enum.EnumVariant.Struct(between(variantName, rBrace), ident, fields)
                 }
                 if (isAtEnd) {
-                    error(bundle.get("diag.miss-variant-struct-end"))
-                        .label(lBrace, bundle.get("diag.variant-field-start"))
-                        .label(lookAhead(0), bundle.get("diag.current"))
+                    reportMissingCloser(scope, lookAhead(0))
                     return Stmt.Enum.EnumVariant.Struct(between(variantName, prevToken), ident, fields)
+                }
+                if (isCloser(lookAhead(0).type)) {
+                    if (abortOnForeignCloser(scope)) {
+                        return Stmt.Enum.EnumVariant.Struct(between(variantName, prevToken), ident, fields)
+                    }
+                    continue
                 }
                 if (check(TokenType.IDENTIFIER)) {
                     if (!isCommaOptional) {
@@ -836,19 +928,32 @@ class Parser(
                 } else {
                     error(bundle.get("diag.miss-variant-field"))
                         .label(lookAhead(0))
-                    when (recoverByTokenTree(EnumSet.of(TokenType.COMMA, TokenType.NEWLINE, TokenType.RBRACE))) {
+                    when (val type = recoverByTokenTree(EnumSet.of(TokenType.COMMA, TokenType.NEWLINE, TokenType.RBRACE))) {
                         TokenType.RBRACE -> {
+                            closeIfMatched(scope)
                             val rBrace = next()
                             return Stmt.Enum.EnumVariant.Struct(between(variantName, rBrace), ident, fields)
                         }
 
-                        TokenType.EOF -> return Stmt.Enum.EnumVariant.Struct(
-                            between(variantName, prevToken),
-                            ident,
-                            fields
-                        )
+                        TokenType.EOF -> {
+                            reportMissingCloser(scope, lookAhead(0))
+                            return Stmt.Enum.EnumVariant.Struct(
+                                between(variantName, prevToken),
+                                ident,
+                                fields
+                            )
+                        }
 
                         else -> {
+                            if (isCloser(type) || isStatementStart(type)) {
+                                // 遇到外层闭合符或新语句：本变体缺 `}`，交还控制权给外层
+                                reportMissingCloser(scope, lookAhead(0))
+                                return Stmt.Enum.EnumVariant.Struct(
+                                    between(variantName, prevToken),
+                                    ident,
+                                    fields
+                                )
+                            }
                             next()
                             isCommaOptional = true
                         }
@@ -1112,15 +1217,26 @@ class Parser(
             when {
                 check(TokenType.LBRACKET) -> { // 对列表的索引或切片
                     val lBracket = next()
+                    val scope = openScope(ScopeKind.INDEX, lBracket)
 
                     val index = expression()
-                    if (index is Expr.Dummy) return Expr.Dummy(between(expr, lookAhead(0)))
-
-                    val rBracket = consume(TokenType.RBRACKET) {
-                        error(bundle.get("diag.index-error")).label(lBracket)
+                    if (index is Expr.Dummy) {
+                        popScope(scope)
+                        return Expr.Dummy(between(expr, lookAhead(0)))
                     }
+                    // 外层闭合符到达：本层缺 `]`，整个后缀表达式作废，交还外层
+                    if (skipNewlineBeforeBoundary()) {
+                        reportMissingCloser(scope, lookAhead(0))
+                        return Expr.Dummy(between(expr, lookAhead(0)))
+                    }
+                    if (isAtEnd) {
+                        reportMissingCloser(scope, lookAhead(0))
+                        return Expr.Dummy(between(expr, lookAhead(0)))
+                    }
+                    if (abortOnForeignCloser(scope)) return Expr.Dummy(between(expr, lookAhead(0)))
 
-                    expr = if (rBracket != null) {
+                    expr = if (expectClose(scope)) {
+                        val rBracket = next()
                         Expr.Index(between(lBracket, rBracket), expr, index)
                     } else {
                         Expr.Index(between(lBracket, index), expr, index)
@@ -1130,20 +1246,28 @@ class Parser(
 
                 check(TokenType.LPAREN) -> { // 函数调用
                     val lParen = next()
+                    val scope = openScope(ScopeKind.CALL_ARGS, lParen)
 
                     val args = Seq<Expr>(8)
                     while (true) {
-                        if (check(TokenType.RPAREN)) {
+                        if (closeIfMatched(scope)) {
                             expr = Expr.Call(between(expr, next()), expr, args)
                             break
                         }
+                        if (skipNewlineBeforeBoundary()) {
+                            reportMissingCloser(scope, lookAhead(0))
+                            return Expr.Dummy(between(expr, lookAhead(0)))
+                        }
+                        if (isAtEnd) {
+                            reportMissingCloser(scope, lookAhead(0))
+                            return Expr.Dummy(between(expr, lookAhead(0)))
+                        }
+                        if (abortOnForeignCloser(scope)) {
+                            return Expr.Dummy(between(expr, lookAhead(0)))
+                        }
                         val innerExpr = expression()
                         if (innerExpr is Expr.Dummy) {
-                            error(bundle.get("diag.miss-call-end")).apply {
-                                label(lParen, bundle.get("diag.arg-start"))
-                                help(bundle.get("miss-arg-end.help"))
-                                    .insert(lookAhead(0), ")")
-                            }
+                            reportMissingCloser(scope, lookAhead(0))
                             return Expr.Dummy(between(expr, lookAhead(0)))
                         }
                         args.add(innerExpr)
@@ -1176,29 +1300,57 @@ class Parser(
 
         } else if (check(TokenType.LPAREN)) {
             val lParen = next()
+            val scope = openScope(ScopeKind.GROUPING, lParen)
             val first = expression()
-            if (first is Expr.Dummy) return Expr.Dummy(between(lParen, first))
+            if (first is Expr.Dummy) {
+                popScope(scope)
+                return Expr.Dummy(between(lParen, first))
+            }
+            // 外层闭合符到达：本层缺 `)`，交还外层
+            if (abortOnForeignCloser(scope)) return Expr.Dummy(between(lParen, first))
+            if (skipNewlineBeforeBoundary()) {
+                reportMissingCloser(scope, lookAhead(0))
+                return Expr.Dummy(between(lParen, prevToken))
+            }
 
             // `(a, b, ...)`：元组字面量（多返回值就是元组，`return (1, "s")`）；
             // 没有逗号时保持 `(a)` 的分组语义
             if (check(TokenType.COMMA)) {
+                scope.kind = ScopeKind.TUPLE
                 val elements = Seq<Expr>(4)
                 elements.add(first)
-                while (match(TokenType.COMMA)) {
-                    if (check(TokenType.RPAREN)) break // 允许尾随逗号
+                match(TokenType.COMMA)
+                while (true) {
+                    if (closeIfMatched(scope)) return Expr.Tuple(between(lParen, next()), elements)
+                    if (skipNewlineBeforeBoundary()) {
+                        reportMissingCloser(scope, lookAhead(0))
+                        return Expr.Tuple(between(lParen, prevToken), elements)
+                    }
+                    if (isAtEnd) {
+                        reportMissingCloser(scope, lookAhead(0))
+                        return Expr.Tuple(between(lParen, prevToken), elements)
+                    }
+                    if (abortOnForeignCloser(scope)) return Expr.Tuple(between(lParen, prevToken), elements)
                     val element = expression()
-                    if (element is Expr.Dummy) return Expr.Dummy(between(lParen, element))
+                    if (element is Expr.Dummy) {
+                        reportMissingCloser(scope, lookAhead(0))
+                        return Expr.Tuple(between(lParen, prevToken), elements)
+                    }
                     elements.add(element)
+                    match(TokenType.COMMA) // 允许尾随逗号
                 }
-                consume(TokenType.RPAREN)
-                return Expr.Tuple(between(lParen, prevToken), elements)
             }
 
-            consume(TokenType.RPAREN)
+            if (expectClose(scope)) {
+                next()
+                return first
+            }
+            // 缺 `)`：已报错，保留分组表达式本身
             return first
 
         } else if (check(TokenType.LBRACE)) {
             val lBrace = next()
+            val scope = openScope(ScopeKind.ARRAY, lBrace)
             val elements = seq(
                 { expression() },
                 EnumSet.of(TokenType.COMMA, TokenType.NEWLINE),
@@ -1210,11 +1362,7 @@ class Parser(
                 },
                 TokenType.RBRACE,
                 true,
-                {
-                    error(bundle.get("diag.miss-array-end"))
-                        .label(lookAhead(0))
-                        .label(lBrace, bundle.get("diag.array-start"))
-                }
+                scope = scope,
             )
             return Expr.Array(between(lBrace, prevToken), elements)
         }
@@ -1398,7 +1546,7 @@ class Parser(
         if (!isStmtEnd && check(TokenType.COLON)) {
             val colon = next()
             if (!subject.generics.isEmpty) {
-                error(bundle.get("diag.unexpected-generic-type-in-annotation"))
+                error(bundle.get("diag.unexpected-generic-type-in-type-annotation"))
                     .label(subject.span.takeLast(subject.span.len - subject.token.span.len))
             }
             val enums = anonymousEnum() ?: return Expr.Dummy(between(colon, prevToken))
@@ -1448,6 +1596,7 @@ class Parser(
      */
     private fun tuple(): Expr {
         val lParen = next()
+        val scope = openScope(ScopeKind.TUPLE, lParen)
         var hasError = false
         val elements = seq(
             { identifier() },
@@ -1461,14 +1610,10 @@ class Parser(
             },
             TokenType.RPAREN,
             true,
-            {
-                error(bundle.get("diag.miss-tuple-end"))
-                    .label(lookAhead(0))
-                    .label(lParen, bundle.get("diag.tuple-start"))
-            }
+            scope = scope,
         )
 //         TODO style提示
-        if (hasError) return Expr.Dummy(between(lParen, prevToken))
+        if (hasError || scope.aborted) return Expr.Dummy(between(lParen, prevToken))
         return Expr.Tuple(between(lParen, prevToken), elements)
     }
 
@@ -1481,6 +1626,7 @@ class Parser(
      * @param end 序列结束标志
      * @param consumeEnd 是否消耗[end]，`false`时不强求[end]出现
      * @param missEnd 错误恢复到EOF时调用，[consumeEnd]为`false`时不使用
+     * @param scope 本序列所属的定界符作用域；给出时由作用域栈统一负责闭合、缺括号报错与外层闭合符冒泡
      */
     private fun seq(
         elementProv: Prov<Expr?>,
@@ -1490,9 +1636,33 @@ class Parser(
         end: TokenType,
         consumeEnd: Boolean,
         missEnd: () -> Unit = {},
+        scope: Scope? = null,
     ): Seq<Expr> {
         val seq = Seq<Expr>()
-        while (!check(end)) {
+        while (true) {
+            // 到达序列结尾：闭合并按需消耗 end
+            if (scope != null) {
+                if (closeIfMatched(scope)) {
+                    if (consumeEnd) next()
+                    return seq
+                }
+            } else if (check(end)) {
+                if (consumeEnd) next()
+                return seq
+            }
+            // 遇到外层闭合符：本层缺少结束符，报错并把控制权交还外层
+            if (scope != null && abortOnForeignCloser(scope)) return seq
+            // 遇到语句起始 token：本层不缺闭合符却停下，说明此处已不属于本序列
+            if (isStatementStart(lookAhead(0).type)) {
+                if (scope != null) reportMissingCloser(scope, lookAhead(0))
+                return seq
+            }
+            if (isAtEnd) {
+                if (scope != null) reportMissingCloser(scope, lookAhead(0))
+                else if (consumeEnd) missEnd()
+                return seq
+            }
+
             val snapshot = createSnapshot()
             val element = elementProv.get()
             if (element == null || element is Expr.Dummy) {
@@ -1508,27 +1678,45 @@ class Parser(
                 // 允许忽略分隔符且不是错误分隔符则继续解析
                 if (isSeparatorOptional.get() && separators.isNotEmpty()) continue
                 // 没有检查到正确分隔符，应该有结束符
-                if (check(end)) break
+                if (scope != null) {
+                    if (closeIfMatched(scope)) {
+                        if (consumeEnd) next()
+                        return seq
+                    }
+                } else if (check(end)) {
+                    if (consumeEnd) next()
+                    return seq
+                }
                 // 没有结束符，可能是漏掉了分隔符，报错并恢复
                 if (!isAtEnd) missSeparator()
             }
             // 解析失败，开始恢复
             when (val type = recoverByTokenTree(separators + end)) {
-                end -> break
-
-                TokenType.EOF -> {
-                    if (consumeEnd) missEnd()
+                end -> {
+                    if (scope != null && !closeIfMatched(scope)) {
+                        reportMissingCloser(scope, lookAhead(0))
+                    }
+                    if (consumeEnd) next()
                     return seq
                 }
 
-                else -> if (separators.contains(type)) {
-                    next()
-                    continue
-                } else kotlin.error("Unreachable")
+                TokenType.EOF -> {
+                    if (scope != null) reportMissingCloser(scope, lookAhead(0))
+                    else if (consumeEnd) missEnd()
+                    return seq
+                }
+
+                else -> {
+                    if (separators.contains(type)) {
+                        next()
+                        continue
+                    }
+                    // 外层闭合符（或其它同步点）：本层提前结束，控制权交还调用方
+                    if (scope != null && !scope.aborted) reportMissingCloser(scope, lookAhead(0))
+                    return seq
+                }
             }
         }
-        if (consumeEnd) next()
-        return seq
     }
 
     // ========== 工具方法 ==========
@@ -1747,6 +1935,8 @@ class Parser(
      */
     private fun consumeStmtEnd(stmt: Stmt? = null): Boolean {
         if (matchStmtEnd()) return true
+        // 闭合符不是语句结束符：交给错误恢复/外层作用域处理，不额外报「缺换行」
+        if (isCloser(lookAhead(0).type)) return false
         // 如果没有找到，报告错误
         error(bundle.get("diag.miss-stmt-end")).apply {
             label(lookAhead(0), "")
@@ -1777,43 +1967,215 @@ class Parser(
         return null
     }
 
+    // ---------- 定界符作用域 ----------
+
+    /**
+     * 开启一个定界符作用域并入栈，供 `(` / `[` / `{` 的解析函数在消耗 opener 后调用。
+     * @param opener 已消耗的开符 token，用于报错定位
+     */
+    private fun openScope(kind: ScopeKind, opener: Token): Scope {
+        val scope = Scope(opener, kind)
+        scopes.add(scope)
+        return scope
+    }
+
+    /** 弹出 [scope] 及其之上的所有帧（正常闭合时其上应无帧） */
+    private fun popScope(scope: Scope) {
+        for (index in scopes.size - 1 downTo 0) {
+            if (scopes.get(index) === scope) {
+                scopes.truncate(index)
+                return
+            }
+        }
+    }
+
+    /**
+     * 尝试用当前 token 闭合 [scope]。
+     * @return 命中时弹出本层并返回 true（**不消耗** token，由调用方推进）
+     */
+    private fun closeIfMatched(scope: Scope): Boolean {
+        if (!check(scope.closer)) return false
+        popScope(scope)
+        return true
+    }
+
+    /**
+     * 要求当前 token 必须是 [scope] 的闭合符：
+     * 成功时弹出本层并返回 true；失败时报告一条诊断（每层只报一次）并返回 false。
+     */
+    private fun expectClose(scope: Scope): Boolean {
+        if (closeIfMatched(scope)) return true
+        reportMissingCloser(scope, lookAhead(0))
+        return false
+    }
+
+    /**
+     * 当前 token 是「其它作用域的闭合符」时，说明本层缺少闭合符：
+     * 报告、弹出本层并返回 true（调用方应立即返回部分节点，把控制权交还外层）。
+     *
+     * 三种处置：
+     * - 该闭合符有配对开符（属于外层）→ 按「插入」报错，让外层照常闭合；
+     * - 没有配对开符，且本层是表达式/列表层 → 更像把闭合符写错了（`print("a"}`），
+     *   按「替换」报错并把它当成本层闭合符消费；
+     * - 其余无主闭合符（语句/声明体里的 stray `)`）→ 报「多余」并丢弃，本层继续解析。
+     */
+    private fun abortOnForeignCloser(scope: Scope): Boolean {
+        val token = lookAhead(0)
+        val type = token.type
+        if (!TokenType.CLOSERS.contains(type) || type == scope.closer) return false
+        if (findScopeByCloser(type) == null) {
+            if (scope.kind.replacesUnmatchedCloser) {
+                reportReplacedCloser(scope, token)
+                next()
+                return true
+            }
+            reportUnmatchedCloser(token)
+            next()
+            return false
+        }
+        reportMissingCloser(scope, token)
+        return true
+    }
+
+    /** 在作用域栈里自上而下找第一个以 [closer] 闭合的帧 */
+    private fun findScopeByCloser(closer: TokenType): Scope? {
+        for (index in scopes.size - 1 downTo 0) {
+            val scope = scopes.get(index)
+            if (scope.closer == closer) return scope
+        }
+        return null
+    }
+
+    /**
+     * 报告 [scope] 未闭合（每层只报一次），并把它从栈里弹出。
+     *
+     * 三种形态：到 EOF（`diag.unclosed-delimiter`）、遇到别的闭合符（`diag.mismatched-delimiter`）、
+     * 遇到普通 token 却要求闭合（`diag.miss-closer`）。
+     */
+    private fun reportMissingCloser(scope: Scope, found: Token) {
+        scope.aborted = true
+        popScope(scope)
+        if (scope.reported) return
+        scope.reported = true
+
+        val openerLabel = bundle.format("diag.opened-here", scope.opener.type, scope.kind.description())
+        if (found.type == TokenType.EOF) {
+            error(bundle.format("diag.unclosed-delimiter", scope.closer))
+                .label(scope.opener, openerLabel)
+                .help(bundle.format("diag.unclosed-delimiter.help", scope.closer))
+                .insert(found, closerLiteral(scope.closer))
+            return
+        }
+        if (TokenType.CLOSERS.contains(found.type)) {
+            val diagnostic = error(bundle.format("diag.mismatched-delimiter", scope.closer, found.type))
+                .label(found, bundle.format("diag.expected-here", scope.closer))
+                .label(scope.opener, openerLabel)
+            diagnostic.help(bundle.format("diag.insert-closer.help", scope.closer, found.type))
+                .insert(found, closerLiteral(scope.closer))
+            // 这个闭合符属于更外层：顺便指出它是关哪一层的，方便对照修复
+            findScopeByCloser(found.type)?.let { outer ->
+                diagnostic.note(bundle.format("diag.outer-closer.note", found.type, outer.kind.description()))
+                    .label(outer.opener, "")
+            }
+            return
+        }
+
+        // 普通 token：本层缺闭合符，但代码还在继续
+        error(bundle.format("diag.miss-closer", scope.closer, scope.kind.description()))
+            .label(found, bundle.format("diag.expected-here", scope.closer))
+            .label(scope.opener, openerLabel)
+            .help(bundle.format("diag.miss-closer.help", scope.closer))
+            .insert(found, closerLiteral(scope.closer))
+    }
+
+    /**
+     * 无配对开符、出现在表达式/列表层时：把 [found] 当作本层闭合符的笔误，
+     * 报「不匹配」并建议用 [Scope.closer] 替换它（调用方随后会消费该 token）。
+     */
+    private fun reportReplacedCloser(scope: Scope, found: Token) {
+        scope.aborted = true
+        popScope(scope)
+        if (scope.reported) return
+        scope.reported = true
+
+        error(bundle.format("diag.mismatched-delimiter", scope.closer, found.type))
+            .label(found, bundle.format("diag.expected-here", scope.closer))
+            .label(
+                scope.opener,
+                bundle.format("diag.opened-here", scope.opener.type, scope.kind.description()),
+            )
+            .help(bundle.format("diag.replace-closer.help", found.type, scope.closer))
+            .replace(found, closerLiteral(scope.closer))
+    }
+
+    /** 报告一个没有任何开符与之配对的闭合符，并给出删除建议 */
+    private fun reportUnmatchedCloser(token: Token) {
+        error(bundle.format("diag.unmatched-closer", token.type))
+            .label(token, "")
+            .help(bundle.get("diag.unmatched-closer.help"))
+            .delete(token)
+    }
+
+    /** `)` / `]` / `}` 的源码字面量（`TokenType.toString()` 带反引号，不适合作为插入建议） */
+    private fun closerLiteral(type: TokenType): String = when (type) {
+        TokenType.RPAREN -> ")"
+        TokenType.RBRACKET -> "]"
+        TokenType.RBRACE -> "}"
+        else -> type.toString()
+    }
+
+    private fun isCloser(type: TokenType): Boolean = TokenType.CLOSERS.contains(type)
+
+    /** 语句起始 token（用于判断「当前位置不可能再是表达式/列表元素，本层缺闭合符」） */
+    private fun isStatementStart(type: TokenType): Boolean = when (type) {
+        TokenType.USE, TokenType.SET, TokenType.MACRO, TokenType.CONST,
+        TokenType.IF, TokenType.FOR, TokenType.WHILE,
+        TokenType.BREAK, TokenType.CONTINUE, TokenType.STRUCT,
+        TokenType.MATCH, TokenType.FN, TokenType.RETURN, TokenType.ENUM,
+        -> true
+
+        else -> false
+    }
+
+    /**
+     * 列表/表达式内部换行后直接跟着闭合符或语句起始 token 时，换行不属于本层内容，先消费它。
+     * @return 换行后是语句起始 token（本层缺闭合符，调用方应报错并返回）
+     */
+    private fun skipNewlineBeforeBoundary(): Boolean {
+        if (lookAhead(0).type != TokenType.NEWLINE) return false
+        val nextType = lookAhead(1).type
+        if (!isCloser(nextType) && !isStatementStart(nextType)) return false
+        next()
+        return isStatementStart(nextType)
+    }
+
     // ---------- 错误恢复方法 ----------
 
     /**
-     * 错误恢复，扫描直到期望的TokenType，但不会消耗，按照Token树解析，不考虑已闭合的定界符
+     * 错误恢复：向前扫描直到出现 [expected] 中的 token，或某个已知作用域的闭合符。
+     * 扫描期间不消耗停下的 token。
+     *
+     * 与旧实现（临时局部括号栈）的区别：用真实的 [scopes] 判断闭合符归属：
+     * - 命中 [expected] → 返回，交调用方处理；
+     * - 遇到某个作用域的闭合符 → 返回该类型，由调用方决定「闭合本层」还是「向外层冒泡」；
+     * - 无主闭合符 → 报告并丢弃；
+     * - 到 EOF → 返回 EOF，交调用方报告未闭合（每层各报一次）。
      */
     private fun recoverByTokenTree(expected: Set<TokenType>): TokenType {
-        val delimiters = Seq<TokenType>()
         while (true) {
-            val type = lookAhead(0).type
-            if (delimiters.isEmpty && (expected.contains(type))) return type
-            when (type) {
-                TokenType.EOF -> return TokenType.EOF
-
-                TokenType.LPAREN -> delimiters.add(type)
-                TokenType.LBRACKET -> delimiters.add(type)
-                TokenType.LBRACE -> delimiters.add(type)
-
-                TokenType.RPAREN -> {
-                    if (!delimiters.isEmpty && delimiters.peek() == TokenType.LPAREN) {
-                        delimiters.pop()
-                    }
+            val token = lookAhead(0)
+            val type = token.type
+            if (type == TokenType.EOF) return TokenType.EOF
+            // 闭合符优先按作用域栈处理：无主的直接报错并丢弃，避免调用方静默吞掉
+            if (TokenType.CLOSERS.contains(type)) {
+                if (findScopeByCloser(type) == null) {
+                    reportUnmatchedCloser(token)
+                    next()
+                    continue
                 }
-
-                TokenType.RBRACKET -> {
-                    if (!delimiters.isEmpty && delimiters.peek() == TokenType.LBRACKET) {
-                        delimiters.pop()
-                    }
-                }
-
-                TokenType.RBRACE -> {
-                    if (!delimiters.isEmpty && delimiters.peek() == TokenType.LBRACE) {
-                        delimiters.pop()
-                    }
-                }
-
-                else -> Unit
+                return type
             }
+            if (expected.contains(type)) return type
             next()
         }
     }
@@ -1834,6 +2196,7 @@ class Parser(
         return Snapshot(
             input.deepCopy(),
             lexer.createSnapshot(),
+            scopeDepth = scopes.size,
         )
     }
 
@@ -1841,7 +2204,8 @@ class Parser(
         return Snapshot(
             input.deepCopy(),
             lexer.createSnapshot(),
-            context.diagHandler.createSnapshot(),
+            diagsSnapshot = context.diagHandler.createSnapshot(),
+            scopeDepth = scopes.size,
         )
     }
 
@@ -1849,6 +2213,8 @@ class Parser(
         input = snapshot.inputSnapshot
         lexer.restoreSnapshot(snapshot.lexerSnapshot)
         snapshot.diagsSnapshot?.let { context.diagHandler.restoreSnapshot(it) }
+        // 投机解析只会新增/闭合自己的帧：把回溯点之后压入的帧截掉即可（O(1)）
+        if (scopes.size > snapshot.scopeDepth) scopes.truncate(snapshot.scopeDepth)
     }
 
     // ---------- 类生成方法 ----------
@@ -1949,10 +2315,61 @@ class Parser(
         }
     }
 
+    /**
+     * 一个尚未闭合的定界符作用域；只服务报错定位与错误恢复，不参与 AST 构造。
+     * @param opener 开符 token（用于 label）
+     */
+    private class Scope(
+        val opener: Token,
+        /** 作用域种类；元组在解析过程中可由「分组表达式」改判，故为可变 */
+        var kind: ScopeKind,
+    ) {
+        val closer: TokenType get() = kind.closer
+
+        /** 已就本层缺失闭合符报过错，避免同一层反复报 */
+        var reported: Boolean = false
+
+        /** 本层因缺失闭合符而提前结束（调用方应立即返回部分节点） */
+        var aborted: Boolean = false
+    }
+
+    /**
+     * 定界符作用域种类：决定期望的闭合符与报错文案（`diag.scope.*`）。
+     *
+     * @param replacesUnmatchedCloser 无配对开符的闭合符是否应按「写错闭合符」替换处理。
+     * 表达式/列表层（`(`、`[`、数组 `{`）为 true；语句/声明体（block、match、struct…）为 false，
+     * 因为用 `)` / `]` 去闭合一个语句块多半只是游离字符，删掉比替换更安全。
+     */
+    private enum class ScopeKind(
+        val closer: TokenType,
+        val descriptionKey: String,
+        val replacesUnmatchedCloser: Boolean = false,
+    ) {
+        BLOCK(TokenType.RBRACE, "diag.scope.block"),
+        MATCH_BODY(TokenType.RBRACE, "diag.scope.match-body"),
+        STRUCT_BODY(TokenType.RBRACE, "diag.scope.struct-body"),
+        ENUM_BODY(TokenType.RBRACE, "diag.scope.enum-body"),
+        VARIANT_BODY(TokenType.RBRACE, "diag.scope.variant-body"),
+        USE_LIST(TokenType.RBRACE, "diag.scope.use-list"),
+        ARRAY(TokenType.RBRACE, "diag.scope.array", true),
+        VARIANT_FIELDS(TokenType.RPAREN, "diag.scope.variant-fields", true),
+        FUNC_PARAMS(TokenType.RPAREN, "diag.scope.func-params", true),
+        CALL_ARGS(TokenType.RPAREN, "diag.scope.call-args", true),
+        PATTERN_ARGS(TokenType.RPAREN, "diag.scope.pattern-args", true),
+        TUPLE(TokenType.RPAREN, "diag.scope.tuple", true),
+        GROUPING(TokenType.RPAREN, "diag.scope.grouping", true),
+        INDEX(TokenType.RBRACKET, "diag.scope.index", true),
+        ;
+
+        fun description(): String = bundle.get(descriptionKey)
+    }
+
     private data class Snapshot(
         val inputSnapshot: InputWindow,
         val lexerSnapshot: Lexer.LexerSnapshot,
         /** null表示不进行快照，恢复时不恢复diags */
         val diagsSnapshot: DiagHandler.DiagsSnapshot? = null,
+        /** 快照时的定界符作用域栈深度，回溯时截断到该深度 */
+        val scopeDepth: Int = 0,
     )
 }
